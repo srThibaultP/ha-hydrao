@@ -6,9 +6,13 @@ Intégration Home Assistant pour les pommeaux de douche connectés **Hydrao**.
 
 La communication BLE est gérée directement par HA via son subsystem Bluetooth natif.
 
+## Appareils pris en charge
+
+Les pommeaux Hydrao qui émettent en Bluetooth LE sous le nom `HYDRAO_SHOWER*`. Testé avec le Hydrao Aloe. Les modèles dont le matériel est antérieur à la version 8 ne remontent pas de débit : une valeur fixe de 6,8 L/min est utilisée.
+
 ## Prérequis
 
-- Home Assistant ≥ 2024.1 avec le subsystem **Bluetooth** activé
+- Home Assistant ≥ 2025.2 avec le subsystem **Bluetooth** activé
 - Un adaptateur Bluetooth sur la machine qui fait tourner HA (Raspberry Pi, NUC, etc.)
 - Le pommeau Hydrao
 
@@ -46,26 +50,62 @@ Aucune saisie d'adresse MAC n'est nécessaire : l'intégration est uniquement ba
 | `sensor.live_volume` | Sensor | Volume en cours (L) |
 | `sensor.live_flow` | Sensor | Débit instantané (L/min) |
 | `sensor.live_temperature` | Sensor | Température eau en cours (°C) |
-| `sensor.live_duration` | Sensor | Durée douche en cours (s) |
+| `sensor.live_duration` | Sensor | Durée douche en cours (min) |
 | `sensor.total_volume` | Sensor | Eau totale consommée (L), pour le dashboard Énergie |
 | `sensor.last_shower_volume` | Sensor | Volume dernière douche (L) |
 | `sensor.last_shower_temperature` | Sensor | Température dernière douche (°C) |
 | `sensor.last_shower_flow` | Sensor | Débit moyen dernière douche (L/min) |
-| `sensor.last_shower_duration` | Sensor | Durée dernière douche (s) |
-| `sensor.last_shower_soaping_time` | Sensor | Temps savonnage (s) |
+| `sensor.last_shower_duration` | Sensor | Durée dernière douche (min) |
+| `sensor.last_shower_soaping_time` | Sensor | Temps savonnage (min) |
 | `sensor.last_shower_date` | Sensor | Horodatage dernière douche |
 | `binary_sensor.is_showering` | Binary Sensor | Douche en cours (ON/OFF) |
-| `sensor.rssi` *(Diagnostic)* | Sensor | Signal BLE (dBm) |
+| `sensor.rssi` *(Diagnostic, désactivé par défaut)* | Sensor | Signal BLE (dBm) |
 | `sensor.firmware_version` *(Diagnostic)* | Sensor | Version firmware |
 
 Tous les capteurs numériques (volume, débit, température, durées) affichent **2 décimales maximum**.
 Les capteurs marqués *Diagnostic* apparaissent dans une section repliée à part sur la fiche de l'appareil.
+
+## Mise à jour des données
+
+Le pommeau n'a pas de pile, il est alimenté par le passage de l'eau : il n'est joignable que pendant une douche. Quand il émet, Home Assistant se connecte, lit les versions, lit dans l'historique les douches qu'il ne connaît pas, puis interroge les valeurs en direct toutes les 2 secondes. À la fin de la douche, la connexion se perd et les valeurs en direct sont remises à zéro. Rien n'est interrogé entre deux douches.
+
+## Cas d'usage et exemples
+
+- Suivre l'eau des douches dans le dashboard Énergie
+- Afficher le volume en cours dans la salle de bain et prévenir au-delà d'une limite :
+
+```yaml
+triggers:
+  - trigger: numeric_state
+    entity_id: sensor.shower_live_volume
+    above: 50
+actions:
+  - action: notify.notify
+    data:
+      message: "Déjà 50 L pour cette douche"
+```
+
+- Démarrer la ventilation quand `binary_sensor.shower_is_showering` passe à on
 
 ## Dashboard Énergie
 
 Ajouter `sensor.total_volume` dans **Paramètres → Tableaux de bord → Énergie → Consommation d'eau**. Les autres capteurs de volume ne sont pas des compteurs : ils ne contiennent qu'une douche à la fois.
 
 Le total vient de l'historique stocké dans le pommeau : chaque douche est comptée une seule fois et les redémarrages ne le modifient pas. Une douche est ajoutée à la connexion suivante du pommeau, c'est-à-dire au début de la douche d'après. La première synchronisation fixe la valeur de départ et n'est pas comptée comme une consommation.
+
+## Limites connues
+
+- Les douches ne peuvent être lues que lorsque le pommeau émet : après un redémarrage, les entités restent indisponibles jusqu'à la douche suivante, sauf le volume total, restauré immédiatement
+- L'historique ne contient pas de date : seule une douche suivie en direct en a une
+- Le volume total est ajouté avec une douche de retard, à la connexion suivante
+- L'historique ignore les douches de moins de 3 L
+
+## Dépannage
+
+- **Le pommeau n'est pas découvert :** faire couler l'eau, il n'émet que pendant une douche. Vérifier qu'un adaptateur ou un proxy Bluetooth est à portée
+- **Les entités restent indisponibles :** elles reviennent à la douche suivante. Sinon, chercher `Still unable to connect` dans les journaux, qui indique le niveau du signal, et rapprocher un proxy
+- **Pas de valeurs en direct alors que l'historique fonctionne :** la connexion est trop courte ou trop faible, un proxy ESPHome près de la salle de bain aide
+- **Signaler un problème :** joindre les diagnostics de l'intégration à l'issue, les identifiants y sont masqués
 
 ## Architecture
 
@@ -75,7 +115,8 @@ Pommeau Hydrao (BLE — broadcast uniquement pendant une douche)
 Home Assistant — custom_components/hydrao
   ├── protocol.py      ← décodage binaire GATT (porté de hydrao-ble-raspberry)
   ├── ble_client.py    ← connexion, sync historique, polling live (2s)
-  ├── coordinator.py   ← push callbacks → entités HA
+  ├── coordinator.py   ← push callbacks → entités HA, position d'historique sauvegardée
+  ├── entity.py        ← entité de base
   ├── config_flow.py   ← découverte BLE passive uniquement (aucune saisie manuelle)
   ├── sensor.py        ← 13 capteurs
   └── binary_sensor.py ← douche en cours

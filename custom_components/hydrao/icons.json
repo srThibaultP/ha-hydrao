@@ -1,0 +1,19 @@
+{
+  "entity": {
+    "binary_sensor": {
+      "is_showering": { "default": "mdi:shower" }
+    },
+    "sensor": {
+      "firmware_version": { "default": "mdi:chip" },
+      "last_shower_date": { "default": "mdi:calendar-clock" },
+      "last_shower_duration": { "default": "mdi:timer-check" },
+      "last_shower_flow": { "default": "mdi:water-pump" },
+      "last_shower_soaping_time": { "default": "mdi:hand-wash" },
+      "last_shower_volume": { "default": "mdi:water" },
+      "live_duration": { "default": "mdi:timer" },
+      "live_flow": { "default": "mdi:water-pump" },
+      "live_volume": { "default": "mdi:shower-head" },
+      "total_volume": { "default": "mdi:water-sync" }
+    }
+  }
+}

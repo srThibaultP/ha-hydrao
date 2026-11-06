@@ -6,9 +6,13 @@ Home Assistant custom integration for **Hydrao** connected shower heads.
 
 Bluetooth LE is handled directly by Home Assistant through its native Bluetooth stack.
 
+## Supported devices
+
+Hydrao shower heads that advertise over Bluetooth LE as `HYDRAO_SHOWER*`. Tested with the Hydrao Aloe. Models with hardware older than version 8 report no flow rate, so a fixed 6.8 L/min is used for them.
+
 ## Requirements
 
-- Home Assistant 2024.1 or later with **Bluetooth** enabled
+- Home Assistant 2025.2 or later with **Bluetooth** enabled
 - A Bluetooth adapter on the machine running Home Assistant (or an ESPHome Bluetooth proxy, see below)
 - A Hydrao shower head
 
@@ -47,26 +51,62 @@ No MAC address is needed: the integration relies on automatic discovery only.
 | `sensor.live_volume` | Sensor | Current volume (L) |
 | `sensor.live_flow` | Sensor | Instant flow rate (L/min) |
 | `sensor.live_temperature` | Sensor | Current water temperature (°C) |
-| `sensor.live_duration` | Sensor | Current shower duration (s) |
+| `sensor.live_duration` | Sensor | Current shower duration (min) |
 | `sensor.total_volume` | Sensor | Total water used (L), for the Energy dashboard |
 | `sensor.last_shower_volume` | Sensor | Last shower volume (L) |
 | `sensor.last_shower_temperature` | Sensor | Last shower temperature (°C) |
 | `sensor.last_shower_flow` | Sensor | Last shower average flow rate (L/min) |
-| `sensor.last_shower_duration` | Sensor | Last shower duration (s) |
-| `sensor.last_shower_soaping_time` | Sensor | Soaping time (s) |
+| `sensor.last_shower_duration` | Sensor | Last shower duration (min) |
+| `sensor.last_shower_soaping_time` | Sensor | Soaping time (min) |
 | `sensor.last_shower_date` | Sensor | Last shower timestamp |
 | `binary_sensor.is_showering` | Binary sensor | Shower in progress (on/off) |
-| `sensor.rssi` *(Diagnostic)* | Sensor | BLE signal (dBm) |
+| `sensor.rssi` *(Diagnostic, disabled by default)* | Sensor | BLE signal (dBm) |
 | `sensor.firmware_version` *(Diagnostic)* | Sensor | Firmware version |
 
 All numeric sensors (volume, flow, temperature, durations) show **2 decimals at most**.
 Sensors marked *Diagnostic* appear in a separate collapsed section on the device page.
+
+## How data is updated
+
+The shower head has no battery and is powered by the water flow, so it can only be reached during a shower. When it starts advertising, Home Assistant connects, reads the versions, reads the showers it does not know yet from the history, then polls the live values every 2 seconds. When the shower ends the connection is lost and the live values are cleared. Nothing is polled between showers.
+
+## Use cases and examples
+
+- Track the water used by showers in the Energy dashboard
+- Show the current volume on a bathroom display, and warn above a limit:
+
+```yaml
+triggers:
+  - trigger: numeric_state
+    entity_id: sensor.shower_live_volume
+    above: 50
+actions:
+  - action: notify.notify
+    data:
+      message: "Already 50 L in this shower"
+```
+
+- Start the bathroom fan when `binary_sensor.shower_is_showering` turns on
 
 ## Energy dashboard
 
 Add `sensor.total_volume` under **Settings → Dashboards → Energy → Water consumption**. The other volume sensors are not counters: they hold one shower at a time.
 
 The total comes from the history stored in the shower head, so each shower is counted once and restarts do not change it. A shower is added when the shower head next connects, which means at the start of the following shower. The first sync sets the starting value and is not counted as consumption.
+
+## Known limitations
+
+- Showers cannot be read before the shower head advertises, so entities stay unavailable after a restart until the next shower. The total volume is the exception, it is restored right away
+- The history has no dates, so showers read from it have no date. Only a shower followed live gets one
+- The total volume is added one shower late, at the next connection
+- Showers under 3 L are ignored by the history
+
+## Troubleshooting
+
+- **The shower head is not discovered:** run the water, it only advertises during a shower. Check that a Bluetooth adapter or proxy is in range
+- **Entities stay unavailable:** they wake up at the next shower. If they do not, look for `Still unable to connect` in the logs, which gives the signal level, and move a proxy closer
+- **Live values are missing but the history works:** the connection is too short or too weak, an ESPHome proxy near the bathroom helps
+- **Reporting a problem:** add the diagnostics of the integration to the issue, identifiers are redacted
 
 ## Architecture
 
@@ -76,7 +116,8 @@ Hydrao shower head (BLE, broadcasts only during a shower)
 Home Assistant, custom_components/hydrao
   ├── protocol.py      ← binary GATT decoding (ported from hydrao-ble-raspberry)
   ├── ble_client.py    ← connection, history sync, live polling (2 s)
-  ├── coordinator.py   ← push callbacks to the entities
+  ├── coordinator.py   ← push callbacks to the entities, saved history position
+  ├── entity.py        ← base entity
   ├── config_flow.py   ← passive BLE discovery only (no manual input)
   ├── sensor.py        ← 13 sensors
   └── binary_sensor.py ← shower in progress

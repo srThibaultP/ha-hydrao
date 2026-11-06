@@ -1,5 +1,6 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
       "bluetooth_confirm": {
         "title": "Pommeau de douche Hydrao",

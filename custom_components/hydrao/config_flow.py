@@ -3,18 +3,19 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant import config_entries
 from homeassistant.components.bluetooth import (
     BluetoothServiceInfoBleak,
     async_discovered_service_info,
 )
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.const import CONF_ADDRESS, CONF_NAME
 
 from .const import DEVICE_NAME_PREFIX, DOMAIN
 
 
-class HydraoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """
+class HydraoConfigFlow(ConfigFlow, domain=DOMAIN):
+    """Config flow of Hydrao.
+
     Hydrao devices are found via passive BLE discovery (the showerhead only
     advertises while a shower is active). This flow supports both:
       - async_step_bluetooth: HA notifies automatically when it sees one.
@@ -27,6 +28,7 @@ class HydraoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     def __init__(self) -> None:
+        """Initialize the flow."""
         self._address: str = ""
         self._name: str = ""
 
@@ -34,7 +36,7 @@ class HydraoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_bluetooth(
         self, discovery_info: BluetoothServiceInfoBleak
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Called by HA when a HYDRAO_SHOWER* advertisement is seen."""
         await self.async_set_unique_id(discovery_info.address)
         self._abort_if_unique_id_configured()
@@ -47,12 +49,12 @@ class HydraoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_bluetooth_confirm(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Single confirm dialog — no fields to fill."""
         if user_input is not None:
             return self.async_create_entry(
                 title=self._name,
-                data={"address": self._address, "name": self._name},
+                data={CONF_ADDRESS: self._address, CONF_NAME: self._name},
             )
 
         self._set_confirm_only()
@@ -65,8 +67,9 @@ class HydraoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """
+    ) -> ConfigFlowResult:
+        """Handle the "+ Add integration" entry point.
+
         Standard entry point shown when the user clicks "+ Add integration"
         and searches for "Hydrao".
 
@@ -75,10 +78,7 @@ class HydraoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         HA's Bluetooth subsystem has already seen recently, and offer it
         directly. If none, we explain what to do.
         """
-        already_configured = {
-            entry.data.get("address")
-            for entry in self._async_current_entries()
-        }
+        already_configured = self._async_current_ids(include_ignore=False)
 
         discovered = [
             info

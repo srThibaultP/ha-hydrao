@@ -1,18 +1,18 @@
 rules:
-  # ── Bronze ──────────────────────────────────────────────────────────────────
+  # Bronze
   action-setup:
     status: exempt
     comment: No service actions are provided by this integration.
   appropriate-polling:
     status: done
-    comment: Push integration via BLE callbacks — no polling interval.
+    comment: Push integration via BLE callbacks , no polling interval.
   brands:
     status: done
     comment: Icon shipped in custom_components/hydrao/brand/.
   common-modules:
     status: done
   config-flow-test-coverage:
-    status: todo
+    status: done
   config-flow:
     status: done
   dependency-transparency:
@@ -47,7 +47,7 @@ rules:
   unique-config-entry:
     status: done
 
-  # ── Silver ───────────────────────────────────────────────────────────────────
+  # Silver
   action-exceptions:
     status: exempt
     comment: No service actions are provided by this integration.
@@ -55,7 +55,7 @@ rules:
     status: done
   docs-configuration-parameters:
     status: exempt
-    comment: No configuration parameters — setup is fully automatic via BLE discovery.
+    comment: No configuration parameters , setup is fully automatic via BLE discovery.
   docs-installation-parameters:
     status: done
   entity-unavailable:
@@ -70,9 +70,9 @@ rules:
     status: exempt
     comment: No authentication required for BLE communication.
   test-coverage:
-    status: todo
+    status: done
 
-  # ── Gold ─────────────────────────────────────────────────────────────────────
+  # Gold
   devices:
     status: done
   diagnostics:
@@ -84,19 +84,19 @@ rules:
     status: done
     comment: async_step_bluetooth handles passive BLE discovery.
   docs-data-update:
-    status: todo
+    status: done
   docs-examples:
-    status: todo
+    status: done
   docs-known-limitations:
-    status: todo
+    status: done
   docs-supported-devices:
-    status: todo
+    status: done
   docs-supported-functions:
     status: done
   docs-troubleshooting:
-    status: todo
+    status: done
   docs-use-cases:
-    status: todo
+    status: done
   dynamic-devices:
     status: exempt
     comment: One device per config entry; no dynamic device addition needed.
@@ -106,15 +106,17 @@ rules:
     status: done
   entity-disabled-by-default:
     status: done
-    comment: Diagnostic entities (rssi, firmware) are in DIAGNOSTIC category.
+    comment: The BLE signal sensor is disabled by default.
   entity-translations:
     status: done
   exception-translations:
-    status: todo
+    status: exempt
+    comment: This integration does not raise exceptions of its own.
   icon-translations:
-    status: todo
+    status: done
   reconfiguration-flow:
-    status: todo
+    status: exempt
+    comment: Nothing to reconfigure, the only setting is the discovered Bluetooth address.
   repair-issues:
     status: exempt
     comment: No cases requiring user intervention via repair flow.
@@ -122,7 +124,7 @@ rules:
     status: exempt
     comment: One device per entry; removed automatically when entry is removed.
 
-  # ── Platinum ──────────────────────────────────────────────────────────────────
+  # Platinum
   async-dependency:
     status: done
     comment: bleak is fully async.
@@ -130,4 +132,4 @@ rules:
     status: exempt
     comment: No HTTP/WebSocket dependency; BLE only.
   strict-typing:
-    status: todo
+    status: done
