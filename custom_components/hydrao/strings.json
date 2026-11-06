@@ -3,11 +3,11 @@
     "step": {
       "bluetooth_confirm": {
         "title": "Hydrao Shower Head",
-        "description": "Configurer {name} ?"
+        "description": "Set up {name}?"
       }
     },
     "abort": {
-      "already_configured": "Cet appareil est déjà configuré.",
+      "already_configured": "This device is already configured.",
       "no_devices_found": "No Hydrao showerhead found. This device only broadcasts over Bluetooth while a shower is actively running. Turn on the water at the showerhead, then try again — or simply wait, Home Assistant will detect it automatically and prompt you the next time it is used."
     }
   },

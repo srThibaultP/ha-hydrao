@@ -1,0 +1,33 @@
+{
+  "config": {
+    "step": {
+      "bluetooth_confirm": {
+        "title": "Hydrao Shower Head",
+        "description": "Set up {name}?"
+      }
+    },
+    "abort": {
+      "already_configured": "This device is already configured.",
+      "no_devices_found": "No Hydrao showerhead found. This device only broadcasts over Bluetooth while a shower is actively running. Turn on the water at the showerhead, then try again — or simply wait, Home Assistant will detect it automatically and prompt you the next time it is used."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "live_volume":              { "name": "Live volume" },
+      "live_flow":                { "name": "Live flow rate" },
+      "live_temperature":         { "name": "Live temperature" },
+      "live_duration":            { "name": "Live duration" },
+      "last_shower_volume":       { "name": "Last shower volume" },
+      "last_shower_temperature":  { "name": "Last shower temperature" },
+      "last_shower_flow":         { "name": "Last shower avg flow" },
+      "last_shower_duration":     { "name": "Last shower duration" },
+      "last_shower_soaping_time": { "name": "Last shower soaping time" },
+      "last_shower_date":         { "name": "Last shower date" },
+      "rssi":                     { "name": "BLE signal strength" },
+      "firmware_version":         { "name": "Firmware version" }
+    },
+    "binary_sensor": {
+      "is_showering": { "name": "Showering" }
+    }
+  }
+}
