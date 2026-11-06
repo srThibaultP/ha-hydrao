@@ -39,11 +39,8 @@ jobs:
           uv venv
           uv pip install -e ./ha-core -e ./ha-core/packages/pytest-home-assistant \
             pytest-cov syrupy mypy
-          # The bluetooth component imports its own requirements
-          uv pip install $(python3 -c "import json, pathlib;
-          d = pathlib.Path('ha-core/homeassistant/components');
-          print(' '.join(r for c in ('bluetooth', 'bluetooth_adapters', 'usb', 'diagnostics')
-          for r in json.loads((d / c / 'manifest.json').read_text()).get('requirements', [])))")
+          # The components loaded by the tests import their own requirements
+          uv pip install $(python3 .github/requirements.py)
       - name: Tests (100% coverage)
         run: uv run --no-sync pytest --cov -p no:cacheprovider
       - name: Strict typing
