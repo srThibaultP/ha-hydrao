@@ -4,33 +4,33 @@ from __future__ import annotations
 import logging
 
 from homeassistant.components.bluetooth import (
+    BluetoothCallbackMatcher,
+    BluetoothChange,
+    BluetoothScanningMode,
+    BluetoothServiceInfoBleak,
     async_address_present,
     async_ble_device_from_address,
     async_last_service_info,
     async_register_callback,
     async_track_unavailable,
-    BluetoothChange,
-    BluetoothCallbackMatcher,
-    BluetoothScanningMode,
 )
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
+from homeassistant.const import CONF_ADDRESS, CONF_NAME, Platform
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.storage import Store
 
 from .ble_client import HydraoDevice
 from .const import DOMAIN
-from .coordinator import HydraoCoordinator
+from .coordinator import HydraoConfigEntry, HydraoCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR]
+STORAGE_VERSION = 1
 
-type HydraoConfigEntry = ConfigEntry[HydraoCoordinator]
+PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: HydraoConfigEntry) -> bool:
-    """
-    Set up a Hydrao device from a config entry.
+    """Set up a Hydrao device from a config entry.
 
     The showerhead only advertises over BLE while a shower is running, so it
     is normal for it to be unreachable most of the time. We never block setup
@@ -38,8 +38,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: HydraoConfigEntry) -> bo
     state, and a Bluetooth callback resolves/reconnects the device as soon as
     it shows up again (i.e. next time someone showers).
     """
-    address: str = entry.data["address"]
-    name: str = entry.data.get("name", address)
+    address: str = entry.data[CONF_ADDRESS]
+    name: str = entry.data.get(CONF_NAME, address)
 
     device = HydraoDevice(ble_device=None, rssi=0)
     device.address = address
@@ -53,14 +53,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: HydraoConfigEntry) -> bo
     if opts.get("hw_version") is not None:
         device.hw_version = opts["hw_version"]
 
+    # Restore the history position and the total, so a restart neither reads
+    # the showers again nor counts them twice.
+    store: Store[dict[str, int | None]] = Store(
+        hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}"
+    )
+    if stored := await store.async_load():
+        device.last_sync_max_index = stored.get("last_sync_max_index")
+        device.total_volume = stored.get("total_volume")
+
     # Stop reconnecting as soon as HA no longer sees the showerhead.
     device.set_presence_check(
         lambda: async_address_present(hass, address, connectable=True)
     )
 
-    coordinator = HydraoCoordinator(hass, device, entry)
+    coordinator = HydraoCoordinator(hass, device, entry, store)
 
-    # IQS runtime-data: store coordinator on entry instead of hass.data
     entry.runtime_data = coordinator
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -74,13 +82,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: HydraoConfigEntry) -> bo
 
     @callback
     def _on_bluetooth_event(
-        service_info, change: BluetoothChange
+        service_info: BluetoothServiceInfoBleak, change: BluetoothChange
     ) -> None:
+        """Connect to the shower head when it advertises."""
         device.update_ble_device(service_info.device, service_info.rssi or 0)
         device.start()  # no-op if already running
 
     @callback
-    def _on_unavailable(service_info) -> None:
+    def _on_unavailable(service_info: BluetoothServiceInfoBleak) -> None:
         """Showerhead stopped advertising: stop trying to reach it."""
         _LOGGER.debug("[%s] No longer advertising, stopping connection loop", address)
         device.stop()

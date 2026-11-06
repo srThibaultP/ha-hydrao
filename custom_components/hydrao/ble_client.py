@@ -1,30 +1,27 @@
-"""
-Hydrao BLE client for Home Assistant.
-Handles connection, history sync and live polling for one device.
-
-"""
+"""Hydrao BLE client: connection, history sync and live polling of one device."""
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
-from datetime import datetime, timezone
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any
 
-from bleak import BleakClient, BleakError
+from bleak import BleakClient
+from bleak.backends.characteristic import BleakGATTCharacteristic
 from bleak.backends.device import BLEDevice
+from bleak.exc import BleakError
 from bleak_retry_connector import establish_connection
 
+from . import protocol as proto
 from .const import (
     CHAR,
-    CONNECT_TIMEOUT,
     DEFAULT_CALIBRATION,
     DEFAULT_THRESHOLDS,
     LEGACY_FLOW,
     LIVE_POLL_INTERVAL,
-    MAX_SOAPING_TIME,
-    MIN_VALID_VOLUME,
 )
-from . import protocol as proto
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -39,39 +36,44 @@ FAILURES_BEFORE_WARNING = 5
 class HydraoDevice:
     """Manages a single Hydrao BLE device: connect → sync → live poll."""
 
-    def __init__(self, ble_device: Optional[BLEDevice], rssi: int = 0) -> None:
+    def __init__(self, ble_device: BLEDevice | None, rssi: int = 0) -> None:
+        """Initialize the device."""
         self.ble_device = ble_device
         self.address: str = ble_device.address if ble_device else ""
         self.rssi: int = rssi
 
         # Device metadata (populated on first connect)
-        self.uuid: Optional[str] = None
-        self.hw_version: Optional[int] = None
-        self.fw_version: Optional[str] = None
+        self.uuid: str | None = None
+        self.hw_version: int | None = None
+        self.fw_version: str | None = None
         self.calibration: int = DEFAULT_CALIBRATION
-        self.thresholds: list[dict] = list(DEFAULT_THRESHOLDS)
+        self.thresholds: list[dict[str, Any]] = list(DEFAULT_THRESHOLDS)
         self.name: str = (ble_device.name if ble_device and ble_device.name else "Shower")
 
         # Live state
         self.live_volume: int = 0
-        self.live_flow: Optional[float] = None
-        self.live_temperature: Optional[float] = None
-        self.live_duration: Optional[float] = None
+        self.live_flow: float | None = None
+        self.live_temperature: float | None = None
+        self.live_duration: float | None = None
         self.is_showering: bool = False
 
         # Last completed shower
-        self.last_shower: Optional[dict] = None
+        self.last_shower: dict[str, Any] | None = None
 
         # History sync state (persisted via HA storage)
-        self.last_sync_max_index: Optional[int] = None
+        self.last_sync_max_index: int | None = None
+
+        # Water used by every shower read from the history (liters). Stays
+        # None until the first sync, so the first value is a baseline.
+        self.total_volume: int | None = None
 
         # Internal
         self._stop = asyncio.Event()
-        self._client: Optional[BleakClient] = None
-        self._task: Optional[asyncio.Task] = None
+        self._client: BleakClient | None = None
+        self._task: asyncio.Task[None] | None = None
         self._update_callbacks: list[UpdateCallback] = []
         self._shower_notif_event = asyncio.Event()
-        self._shower_notif_data: Optional[bytes] = None
+        self._shower_notif_data: bytes | None = None
         # Tells whether HA still sees the showerhead advertising. The
         # showerhead only advertises during a shower, so once it disappears
         # there is nothing to connect to and retrying would only fill the logs.
@@ -82,25 +84,21 @@ class HydraoDevice:
         self._session_volume = 0
         self._session_flow_samples: list[float] = []
         self._session_temp_samples: list[float] = []
-        self._session_start: Optional[datetime] = None
+        self._session_start: datetime | None = None
 
     # ── Public ────────────────────────────────────────────────────────────────
 
     def register_callback(self, cb: UpdateCallback) -> None:
+        """Register a function called with every new snapshot."""
         self._update_callbacks.append(cb)
-
-    def unregister_callback(self, cb: UpdateCallback) -> None:
-        self._update_callbacks.discard(cb) if hasattr(self._update_callbacks, "discard") else None
-        if cb in self._update_callbacks:
-            self._update_callbacks.remove(cb)
 
     def set_presence_check(self, is_present: Callable[[], bool]) -> None:
         """Set the function telling whether the device is still advertising."""
         self._is_present = is_present
 
     def start(self) -> None:
-        """
-        Start the background connection+polling task.
+        """Start the background connection and polling task.
+
         No-op if no BLE device has been resolved yet (showerhead not
         advertising — e.g. no shower currently running). Call again via
         update_ble_device() once an advertisement is seen.
@@ -144,6 +142,7 @@ class HydraoDevice:
             "is_showering": self.is_showering,
             # last shower
             "last_shower": self.last_shower,
+            "total_volume": self.total_volume,
         }
 
     # ── Connection loop ────────────────────────────────────────────────────────
@@ -168,7 +167,7 @@ class HydraoDevice:
                 failures = 0
             except asyncio.CancelledError:
                 return
-            except (BleakError, asyncio.TimeoutError, OSError) as err:
+            except (BleakError, TimeoutError, OSError) as err:
                 failures += 1
                 if failures == FAILURES_BEFORE_WARNING and self._is_present():
                     _LOGGER.warning(
@@ -191,6 +190,7 @@ class HydraoDevice:
 
     async def _connect_and_run(self) -> None:
         _LOGGER.debug("[%s] Connecting...", self.address)
+        assert self.ble_device is not None
         client = await establish_connection(
             BleakClient,
             self.ble_device,
@@ -221,37 +221,7 @@ class HydraoDevice:
         holder, so we never see a natural 'volume = 0' frame at the end.
         We must clear live values here to avoid sensors staying stuck.
         """
-        if self._session_active:
-            # Build last_shower from whatever we accumulated
-            avg_flow = (
-                sum(self._session_flow_samples) / len(self._session_flow_samples)
-                if self._session_flow_samples else None
-            )
-            avg_temp = (
-                sum(self._session_temp_samples) / len(self._session_temp_samples)
-                if self._session_temp_samples else None
-            )
-            duration = (self._session_volume / avg_flow) if avg_flow else None
-            self.last_shower = {
-                "volume": self._session_volume,
-                "temperature": avg_temp,
-                "flow": avg_flow,
-                "duration": duration,
-                "soaping_time": None,
-                "date": (self._session_start or datetime.now(timezone.utc)).isoformat(),
-            }
-            _LOGGER.info(
-                "[%s] Shower ended (disconnected): vol=%dL flow=%s temp=%s dur=%s",
-                self.address, self._session_volume,
-                f"{avg_flow:.1f}L/min" if avg_flow else "N/A",
-                f"{avg_temp:.1f}°C" if avg_temp else "N/A",
-                f"{duration:.1f}min" if duration else "N/A",
-            )
-            self._session_active = False
-            self._session_volume = 0
-            self._session_flow_samples = []
-            self._session_temp_samples = []
-            self._session_start = None
+        self._finish_session()
 
         # Reset all live sensors to zero / None
         self.live_volume = 0
@@ -260,6 +230,30 @@ class HydraoDevice:
         self.live_duration = None
         self.is_showering = False
         self._notify_update()
+
+    def _finish_session(self) -> None:
+        """Build the last shower from the live samples, if one was running."""
+        if not self._session_active:
+            return
+        volume = self._session_volume
+        flows = self._session_flow_samples
+        temperatures = self._session_temp_samples
+        avg_flow = sum(flows) / len(flows) if flows else None
+        avg_temp = sum(temperatures) / len(temperatures) if temperatures else None
+        self.last_shower = {
+            "volume": volume,
+            "temperature": avg_temp,
+            "flow": avg_flow,
+            "duration": volume / avg_flow if avg_flow else None,  # minutes
+            "soaping_time": None,
+            "date": (self._session_start or datetime.now(UTC)).isoformat(),
+        }
+        _LOGGER.info("[%s] Shower ended: %d L", self.address, volume)
+        self._session_active = False
+        self._session_volume = 0
+        self._session_flow_samples = []
+        self._session_temp_samples = []
+        self._session_start = None
 
     # ── Metadata ──────────────────────────────────────────────────────────────
 
@@ -322,7 +316,7 @@ class HydraoDevice:
             await client.start_notify(CHAR["shower_data"], self._on_shower_notification)
             await asyncio.sleep(0.2)
             use_notify = True
-        except Exception as exc:
+        except (BleakError, TimeoutError, OSError) as exc:
             _LOGGER.debug("[%s] Notifications unavailable (%s), falling back to polling", self.address, exc)
 
         last_shower_data = None
@@ -334,25 +328,26 @@ class HydraoDevice:
                 if data:
                     last_shower_data = data
                     self.last_sync_max_index = shower_id
+                    self.total_volume = (self.total_volume or 0) + data["volume"]
         finally:
             if use_notify:
-                try:
+                with contextlib.suppress(BleakError, TimeoutError, OSError):
                     await client.stop_notify(CHAR["shower_data"])
-                except Exception:
-                    pass
 
         if last_shower_data:
             self.last_shower = last_shower_data
             self._notify_update()
         _LOGGER.info("[%s] History sync done, last_index=%s", self.address, self.last_sync_max_index)
 
-    def _on_shower_notification(self, _sender: int, data: bytearray) -> None:
+    def _on_shower_notification(
+        self, _sender: BleakGATTCharacteristic, data: bytearray
+    ) -> None:
         self._shower_notif_data = bytes(data)
         self._shower_notif_event.set()
 
     async def _fetch_one_shower(
         self, client: BleakClient, shower_id: int, *, use_notify: bool
-    ) -> Optional[dict]:
+    ) -> dict[str, Any] | None:
         self._shower_notif_event.clear()
         self._shower_notif_data = None
         await self._write(client, "shower_request", proto.encode_shower_request(shower_id))
@@ -361,7 +356,7 @@ class HydraoDevice:
             try:
                 await asyncio.wait_for(self._shower_notif_event.wait(), timeout=3.0)
                 data = self._shower_notif_data
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 await asyncio.sleep(0.1)
                 data = await self._read(client, "shower_data")
         else:
@@ -398,7 +393,7 @@ class HydraoDevice:
 
                 if not self._session_active:
                     self._session_active = True
-                    self._session_start = datetime.now(timezone.utc)
+                    self._session_start = datetime.now(UTC)
                     self._session_flow_samples = []
                     self._session_temp_samples = []
                     _LOGGER.info("[%s] Shower started", self.address)
@@ -418,33 +413,7 @@ class HydraoDevice:
                 self.is_showering = True
 
             else:
-                if self._session_active:
-                    # Shower just ended → build last_shower record
-                    self._session_active = False
-                    avg_flow = (
-                        sum(self._session_flow_samples) / len(self._session_flow_samples)
-                        if self._session_flow_samples else None
-                    )
-                    avg_temp = (
-                        sum(self._session_temp_samples) / len(self._session_temp_samples)
-                        if self._session_temp_samples else None
-                    )
-                    duration = (self._session_volume / avg_flow) if avg_flow else None  # minutes
-                    self.last_shower = {
-                        "volume": self._session_volume,
-                        "temperature": avg_temp,
-                        "flow": avg_flow,
-                        "duration": duration,
-                        "soaping_time": None,
-                        "date": (self._session_start or datetime.now(timezone.utc)).isoformat(),
-                    }
-                    _LOGGER.info(
-                        "[%s] Shower ended: vol=%dL flow=%s temp=%s dur=%s",
-                        self.address, self._session_volume,
-                        f"{avg_flow:.1f}L/min" if avg_flow else "N/A",
-                        f"{avg_temp:.1f}°C" if avg_temp else "N/A",
-                        f"{duration:.1f}min" if duration else "N/A",
-                    )
+                self._finish_session()
 
                 self.live_volume = 0
                 self.live_flow = None
@@ -465,10 +434,10 @@ class HydraoDevice:
             except Exception:
                 _LOGGER.exception("[%s] Callback error", self.address)
 
-    async def _read(self, client: BleakClient, char_name: str) -> Optional[bytes]:
+    async def _read(self, client: BleakClient, char_name: str) -> bytes | None:
         try:
             return bytes(await client.read_gatt_char(CHAR[char_name]))
-        except Exception as exc:
+        except (BleakError, TimeoutError, OSError) as exc:
             _LOGGER.debug("[%s] Read %s failed: %s", self.address, char_name, exc)
             return None
 
@@ -476,6 +445,6 @@ class HydraoDevice:
         try:
             await client.write_gatt_char(CHAR[char_name], data, response=True)
             return True
-        except Exception as exc:
+        except (BleakError, TimeoutError, OSError) as exc:
             _LOGGER.debug("[%s] Write %s failed: %s", self.address, char_name, exc)
             return False

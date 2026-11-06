@@ -1,5 +1,6 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
       "bluetooth_confirm": {
         "title": "Pommeau de douche Hydrao",
@@ -17,6 +18,7 @@
       "live_flow":                { "name": "Débit en cours" },
       "live_temperature":         { "name": "Température en cours" },
       "live_duration":            { "name": "Durée en cours" },
+      "total_volume":             { "name": "Volume total" },
       "last_shower_volume":       { "name": "Volume dernière douche" },
       "last_shower_temperature":  { "name": "Température dernière douche" },
       "last_shower_flow":         { "name": "Débit moyen dernière douche" },

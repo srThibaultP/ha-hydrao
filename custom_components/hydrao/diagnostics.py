@@ -3,43 +3,30 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.components.diagnostics import async_redact_data
+from homeassistant.const import CONF_ADDRESS, CONF_NAME
 from homeassistant.core import HomeAssistant
 
-from .coordinator import HydraoCoordinator
+from .coordinator import HydraoConfigEntry
+
+TO_REDACT = {CONF_ADDRESS, CONF_NAME, "uuid"}
 
 
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: HydraoConfigEntry,
 ) -> dict[str, Any]:
     """Return diagnostics for a Hydrao config entry."""
-    coordinator: HydraoCoordinator = entry.runtime_data
+    coordinator = entry.runtime_data
     device = coordinator.device
-    data = coordinator.data or {}
-
-    return {
-        "entry": {
-            "address": entry.data.get("address"),
-            "name": entry.data.get("name"),
-            "options": dict(entry.options),
+    return async_redact_data(
+        {
+            "entry": {"data": dict(entry.data), "options": dict(entry.options)},
+            "device": {
+                "ble_device_known": device.ble_device is not None,
+                "last_sync_max_index": device.last_sync_max_index,
+                **coordinator.data,
+            },
         },
-        "device": {
-            "address": device.address,
-            "name": device.name,
-            "uuid": device.uuid,
-            "hw_version": device.hw_version,
-            "fw_version": device.fw_version,
-            "calibration": device.calibration,
-            "rssi": device.rssi,
-            "ble_connected": device.ble_device is not None,
-        },
-        "live": {
-            "is_showering": data.get("is_showering"),
-            "live_volume": data.get("live_volume"),
-            "live_flow": data.get("live_flow"),
-            "live_temperature": data.get("live_temperature"),
-            "live_duration": data.get("live_duration"),
-        },
-        "last_shower": data.get("last_shower"),
-    }
+        TO_REDACT,
+    )

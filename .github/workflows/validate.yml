@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+env:
+  HA_REF: "2026.11.0b2"
+
 jobs:
   hacs:
     runs-on: ubuntu-latest
@@ -18,3 +21,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: home-assistant/actions/hassfest@master
+
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: home-assistant/core
+          ref: ${{ env.HA_REF }}
+          path: ha-core
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.14"
+      - name: Install Home Assistant and test helpers
+        run: |
+          uv venv
+          uv pip install -e ./ha-core -e ./ha-core/packages/pytest-home-assistant \
+            pytest-cov syrupy mypy
+          # The components loaded by the tests import their own requirements
+          uv pip install $(python3 .github/requirements.py)
+      - name: Tests (100% coverage)
+        run: uv run --no-sync pytest --cov -p no:cacheprovider
+      - name: Strict typing
+        # Editable installs are invisible to mypy, point it at the checkout
+        env:
+          MYPYPATH: ha-core
+        run: uv run --no-sync mypy

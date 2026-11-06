@@ -1,5 +1,6 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
       "bluetooth_confirm": {
         "title": "Hydrao Shower Head",
@@ -17,6 +18,7 @@
       "live_flow":                { "name": "Live flow rate" },
       "live_temperature":         { "name": "Live temperature" },
       "live_duration":            { "name": "Live duration" },
+      "total_volume":             { "name": "Total water volume" },
       "last_shower_volume":       { "name": "Last shower volume" },
       "last_shower_temperature":  { "name": "Last shower temperature" },
       "last_shower_flow":         { "name": "Last shower avg flow" },

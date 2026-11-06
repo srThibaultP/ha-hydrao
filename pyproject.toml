@@ -1,0 +1,25 @@
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+# The respx plugin imports httpx before Home Assistant can alias it to httpx2
+addopts = "-p no:respx"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["custom_components.hydrao"]
+
+[tool.coverage.report]
+fail_under = 100
+show_missing = true
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+warn_unreachable = true
+disallow_any_generics = true
+explicit_package_bases = true
+files = ["custom_components/hydrao"]
+
+[[tool.mypy.overrides]]
+module = ["homeassistant.*"]
+follow_imports = "silent"

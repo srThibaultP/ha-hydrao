@@ -1,18 +1,15 @@
-"""
-Hydrao GATT binary protocol decoder.
-
-"""
+"""Hydrao GATT binary protocol decoder."""
 from __future__ import annotations
 
 import struct
-from typing import Optional
+from typing import Any
 
 from .const import DEFAULT_CALIBRATION, MAX_SOAPING_TIME, MIN_VALID_VOLUME
-
 
 # ── Device UUID ───────────────────────────────────────────────────────────────
 
 def decode_device_uuid(data: bytes) -> str:
+    """Decode the device UUID."""
     if len(data) >= 16:
         p1 = struct.unpack_from("<I", data, 0)[0]
         p2 = struct.unpack_from("<H", data, 4)[0]
@@ -31,14 +28,16 @@ def decode_device_uuid(data: bytes) -> str:
 # ── Calibration ───────────────────────────────────────────────────────────────
 
 def decode_calibration(data: bytes) -> int:
+    """Decode the flow calibration."""
     if len(data) < 2:
         return DEFAULT_CALIBRATION
-    return struct.unpack_from("<H", data, 0)[0]
+    return int(struct.unpack_from("<H", data, 0)[0])
 
 
 # ── Thresholds ────────────────────────────────────────────────────────────────
 
-def decode_thresholds(data: bytes) -> list[dict]:
+def decode_thresholds(data: bytes) -> list[dict[str, Any]]:
+    """Decode the LED thresholds."""
     if len(data) < 16:
         return []
     result = []
@@ -49,10 +48,12 @@ def decode_thresholds(data: bytes) -> list[dict]:
         result.append({"color": f"#{r:02X}{g:02X}{b:02X}", "liter": float(liters)})
     return result
 
-def thresholds_are_empty(thresholds: list[dict]) -> bool:
+def thresholds_are_empty(thresholds: list[dict[str, Any]]) -> bool:
+    """Return whether no threshold is set."""
     return all(t["liter"] == 0 for t in thresholds)
 
-def encode_thresholds(thresholds: list[dict]) -> bytes:
+def encode_thresholds(thresholds: list[dict[str, Any]]) -> bytes:
+    """Encode the LED thresholds."""
     result = bytearray(16)
     for i, t in enumerate(thresholds[:4]):
         off = i * 4
@@ -67,29 +68,33 @@ def encode_thresholds(thresholds: list[dict]) -> bytes:
 # ── Shower range ──────────────────────────────────────────────────────────────
 
 def decode_shower_range(data: bytes) -> tuple[int, int]:
+    """Decode the first and last shower ids of the history."""
     if len(data) < 4:
         return 0, 0
     return struct.unpack_from("<H", data, 0)[0], struct.unpack_from("<H", data, 2)[0]
 
 def encode_shower_request(shower_id: int) -> bytes:
+    """Encode the request for one shower of the history."""
     return struct.pack("<H", shower_id)
 
 
 # ── Live characteristics ──────────────────────────────────────────────────────
 
 def decode_live_volume(data: bytes) -> int:
+    """Decode the volume of the running shower."""
     if len(data) < 3:
         return 0
     return data[2]
 
 
-def _convert_flow(raw: int, calibration: int) -> Optional[float]:
+def _convert_flow(raw: int, calibration: int) -> float | None:
     if raw == 0 or calibration == 0:
         return None
     return (1000 * 60 * 20) / (calibration * raw)
 
 
-def decode_live_flow(data: bytes, calibration: int) -> tuple[Optional[float], Optional[float]]:
+def decode_live_flow(data: bytes, calibration: int) -> tuple[float | None, float | None]:
+    """Decode the instant and average flow rates."""
     if len(data) < 4:
         return None, None
     instant_raw = struct.unpack_from("<H", data, 0)[0]
@@ -97,7 +102,7 @@ def decode_live_flow(data: bytes, calibration: int) -> tuple[Optional[float], Op
     return _convert_flow(instant_raw, calibration), _convert_flow(average_raw, calibration)
 
 
-def _convert_temperature(raw: int) -> Optional[float]:
+def _convert_temperature(raw: int) -> float | None:
     if raw > 3000:
         return None
     elif raw > 100:
@@ -106,7 +111,8 @@ def _convert_temperature(raw: int) -> Optional[float]:
         return raw / 2
 
 
-def decode_live_temperature(data: bytes) -> tuple[Optional[float], Optional[float]]:
+def decode_live_temperature(data: bytes) -> tuple[float | None, float | None]:
+    """Decode the instant and average temperatures."""
     if len(data) < 4:
         return None, None
     instant_raw = struct.unpack_from("<H", data, 0)[0]
@@ -116,7 +122,8 @@ def decode_live_temperature(data: bytes) -> tuple[Optional[float], Optional[floa
 
 # ── Historical shower ─────────────────────────────────────────────────────────
 
-def decode_shower_data(data: bytes, calibration: int) -> Optional[dict]:
+def decode_shower_data(data: bytes, calibration: int) -> dict[str, Any] | None:
+    """Decode one shower of the history."""
     if len(data) < 7:
         return None
     if all(b == 0xFF for b in data[1:]):

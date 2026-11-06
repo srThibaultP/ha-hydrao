@@ -1,52 +1,41 @@
-"""Hydrao binary sensor — is a shower currently active."""
+"""Hydrao binary sensor: is a shower currently running."""
 from __future__ import annotations
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .const import DOMAIN
-from .coordinator import HydraoCoordinator
-from .sensor import _device_info
+from .const import BINARY_IS_SHOWERING
+from .coordinator import HydraoConfigEntry, HydraoCoordinator
+from .entity import HydraoEntity
 
-# IQS parallel-updates: push integration, no parallel polling needed
+# Push integration, nothing is polled
 PARALLEL_UPDATES = 0
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    entry: HydraoConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    coordinator: HydraoCoordinator = entry.runtime_data
-    async_add_entities([HydraoShoweringBinarySensor(coordinator)])
+    """Set up the binary sensor."""
+    async_add_entities([HydraoShoweringBinarySensor(entry.runtime_data)])
 
 
-class HydraoShoweringBinarySensor(CoordinatorEntity[HydraoCoordinator], BinarySensorEntity):
-    """True when the showerhead reports an active shower."""
+class HydraoShoweringBinarySensor(HydraoEntity, BinarySensorEntity):
+    """On while the shower head reports a running shower."""
 
-    _attr_has_entity_name = True
-    _attr_translation_key = "is_showering"
-    _attr_name = "Douche en cours"
+    _attr_translation_key = BINARY_IS_SHOWERING
     _attr_device_class = BinarySensorDeviceClass.RUNNING
-    _attr_icon = "mdi:shower"
 
     def __init__(self, coordinator: HydraoCoordinator) -> None:
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.device.address}_is_showering"
-        self._attr_device_info = _device_info(coordinator)
+        """Initialize the binary sensor."""
+        super().__init__(coordinator, BINARY_IS_SHOWERING)
 
     @property
-    def available(self) -> bool:
-        return self.coordinator.device.ble_device is not None
-
-    @property
-    def is_on(self) -> bool | None:
-        if not self.coordinator.data:
-            return None
+    def is_on(self) -> bool:
+        """Return whether a shower is running."""
         return bool(self.coordinator.data.get("is_showering", False))
