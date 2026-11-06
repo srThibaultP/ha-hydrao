@@ -124,7 +124,7 @@ bluetooth_proxy:
 
 ## License
 
-Apache 2.0, based on the open source [Hydrao](https://github.com/hydrao-opensource) projects.
+[Apache 2.0](LICENSE), based on the open source [Hydrao](https://github.com/hydrao-opensource) projects.
 
 ## Uninstall
 
