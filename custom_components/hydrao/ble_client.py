@@ -65,6 +65,10 @@ class HydraoDevice:
         # History sync state (persisted via HA storage)
         self.last_sync_max_index: Optional[int] = None
 
+        # Water used by every shower read from the history (liters). Stays
+        # None until the first sync, so the first value is a baseline.
+        self.total_volume: Optional[int] = None
+
         # Internal
         self._stop = asyncio.Event()
         self._client: Optional[BleakClient] = None
@@ -144,6 +148,7 @@ class HydraoDevice:
             "is_showering": self.is_showering,
             # last shower
             "last_shower": self.last_shower,
+            "total_volume": self.total_volume,
         }
 
     # ── Connection loop ────────────────────────────────────────────────────────
@@ -334,6 +339,7 @@ class HydraoDevice:
                 if data:
                     last_shower_data = data
                     self.last_sync_max_index = shower_id
+                    self.total_volume = (self.total_volume or 0) + data["volume"]
         finally:
             if use_notify:
                 try:

@@ -6,6 +6,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import DOMAIN
@@ -22,7 +23,11 @@ class HydraoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """
 
     def __init__(
-        self, hass: HomeAssistant, device: HydraoDevice, entry: ConfigEntry
+        self,
+        hass: HomeAssistant,
+        device: HydraoDevice,
+        entry: ConfigEntry,
+        store: Store[dict[str, int | None]],
     ) -> None:
         super().__init__(
             hass,
@@ -31,6 +36,8 @@ class HydraoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self.device = device
         self._entry = entry
+        self._store = store
+        self._saved_index = device.last_sync_max_index
         self._was_available = False
         self.data: dict[str, Any] = device.as_dict()
 
@@ -49,6 +56,11 @@ class HydraoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.info("[%s] Device unavailable (shower ended / out of range)", self.device.address)
         self._was_available = now_available
 
+        # Persist the history position and the total together, they must agree
+        if self.device.last_sync_max_index != self._saved_index:
+            self._saved_index = self.device.last_sync_max_index
+            self._store.async_delay_save(self._history_state, 1)
+
         # Persist fw_version and hw_version so they survive HA restarts
         fw = snapshot.get("fw_version")
         hw = snapshot.get("hw_version")
@@ -58,6 +70,13 @@ class HydraoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._entry,
                 options={**current_opts, "fw_version": fw, "hw_version": hw},
             )
+
+    def _history_state(self) -> dict[str, int | None]:
+        """Return what has to survive a restart."""
+        return {
+            "last_sync_max_index": self.device.last_sync_max_index,
+            "total_volume": self.device.total_volume,
+        }
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fallback — normally never called since we use push callbacks."""

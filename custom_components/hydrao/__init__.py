@@ -16,12 +16,15 @@ from homeassistant.components.bluetooth import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.storage import Store
 
 from .ble_client import HydraoDevice
 from .const import DOMAIN
 from .coordinator import HydraoCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+STORAGE_VERSION = 1
 
 PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR]
 
@@ -53,12 +56,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: HydraoConfigEntry) -> bo
     if opts.get("hw_version") is not None:
         device.hw_version = opts["hw_version"]
 
+    # Restore the history position and the total, so a restart neither reads
+    # the showers again nor counts them twice.
+    store: Store[dict[str, int | None]] = Store(
+        hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}"
+    )
+    if stored := await store.async_load():
+        device.last_sync_max_index = stored.get("last_sync_max_index")
+        device.total_volume = stored.get("total_volume")
+
     # Stop reconnecting as soon as HA no longer sees the showerhead.
     device.set_presence_check(
         lambda: async_address_present(hass, address, connectable=True)
     )
 
-    coordinator = HydraoCoordinator(hass, device, entry)
+    coordinator = HydraoCoordinator(hass, device, entry, store)
 
     # IQS runtime-data: store coordinator on entry instead of hass.data
     entry.runtime_data = coordinator

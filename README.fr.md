@@ -47,6 +47,7 @@ Aucune saisie d'adresse MAC n'est nécessaire : l'intégration est uniquement ba
 | `sensor.live_flow` | Sensor | Débit instantané (L/min) |
 | `sensor.live_temperature` | Sensor | Température eau en cours (°C) |
 | `sensor.live_duration` | Sensor | Durée douche en cours (s) |
+| `sensor.total_volume` | Sensor | Eau totale consommée (L), pour le dashboard Énergie |
 | `sensor.last_shower_volume` | Sensor | Volume dernière douche (L) |
 | `sensor.last_shower_temperature` | Sensor | Température dernière douche (°C) |
 | `sensor.last_shower_flow` | Sensor | Débit moyen dernière douche (L/min) |
@@ -60,6 +61,12 @@ Aucune saisie d'adresse MAC n'est nécessaire : l'intégration est uniquement ba
 Tous les capteurs numériques (volume, débit, température, durées) affichent **2 décimales maximum**.
 Les capteurs marqués *Diagnostic* apparaissent dans une section repliée à part sur la fiche de l'appareil.
 
+## Dashboard Énergie
+
+Ajouter `sensor.total_volume` dans **Paramètres → Tableaux de bord → Énergie → Consommation d'eau**. Les autres capteurs de volume ne sont pas des compteurs : ils ne contiennent qu'une douche à la fois.
+
+Le total vient de l'historique stocké dans le pommeau : chaque douche est comptée une seule fois et les redémarrages ne le modifient pas. Une douche est ajoutée à la connexion suivante du pommeau, c'est-à-dire au début de la douche d'après. La première synchronisation fixe la valeur de départ et n'est pas comptée comme une consommation.
+
 ## Architecture
 
 ```
@@ -70,7 +77,7 @@ Home Assistant — custom_components/hydrao
   ├── ble_client.py    ← connexion, sync historique, polling live (2s)
   ├── coordinator.py   ← push callbacks → entités HA
   ├── config_flow.py   ← découverte BLE passive uniquement (aucune saisie manuelle)
-  ├── sensor.py        ← 12 capteurs
+  ├── sensor.py        ← 13 capteurs
   └── binary_sensor.py ← douche en cours
 ```
 

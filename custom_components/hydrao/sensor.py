@@ -39,6 +39,7 @@ from .const import (
     SENSOR_LIVE_TEMPERATURE,
     SENSOR_LIVE_VOLUME,
     SENSOR_RSSI,
+    SENSOR_TOTAL_VOLUME,
 )
 from .coordinator import HydraoCoordinator
 
@@ -98,6 +99,19 @@ SENSOR_DESCRIPTIONS: tuple[HydraoSensorDescription, ...] = (
         icon="mdi:timer",
         value_key="live_duration",
         # already in minutes from ble_client
+    ),
+    # Cumulative counter for the Energy dashboard. Showers are counted once,
+    # from the showerhead history, at the next connection after they end.
+    HydraoSensorDescription(
+        key=SENSOR_TOTAL_VOLUME,
+        translation_key=SENSOR_TOTAL_VOLUME,
+        name="Volume total",
+        native_unit_of_measurement=UnitOfVolume.LITERS,
+        device_class=SensorDeviceClass.WATER,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        suggested_display_precision=0,
+        icon="mdi:water-sync",
+        value_key="total_volume",
     ),
     # ── Dernière douche ────────────────────────────────────────────────────────
     HydraoSensorDescription(
@@ -224,7 +238,11 @@ class HydraoSensorEntity(CoordinatorEntity[HydraoCoordinator], SensorEntity):
     @property
     def available(self) -> bool:
         """Unavailable until the showerhead has been seen advertising at least once."""
-        return self.coordinator.device.ble_device is not None
+        device = self.coordinator.device
+        if self.entity_description.key == SENSOR_TOTAL_VOLUME:
+            # Known from storage, no need to wait for the next shower
+            return device.total_volume is not None
+        return device.ble_device is not None
 
     @property
     def native_value(self) -> Any:

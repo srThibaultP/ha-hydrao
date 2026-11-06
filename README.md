@@ -48,6 +48,7 @@ No MAC address is needed: the integration relies on automatic discovery only.
 | `sensor.live_flow` | Sensor | Instant flow rate (L/min) |
 | `sensor.live_temperature` | Sensor | Current water temperature (°C) |
 | `sensor.live_duration` | Sensor | Current shower duration (s) |
+| `sensor.total_volume` | Sensor | Total water used (L), for the Energy dashboard |
 | `sensor.last_shower_volume` | Sensor | Last shower volume (L) |
 | `sensor.last_shower_temperature` | Sensor | Last shower temperature (°C) |
 | `sensor.last_shower_flow` | Sensor | Last shower average flow rate (L/min) |
@@ -61,6 +62,12 @@ No MAC address is needed: the integration relies on automatic discovery only.
 All numeric sensors (volume, flow, temperature, durations) show **2 decimals at most**.
 Sensors marked *Diagnostic* appear in a separate collapsed section on the device page.
 
+## Energy dashboard
+
+Add `sensor.total_volume` under **Settings → Dashboards → Energy → Water consumption**. The other volume sensors are not counters: they hold one shower at a time.
+
+The total comes from the history stored in the shower head, so each shower is counted once and restarts do not change it. A shower is added when the shower head next connects, which means at the start of the following shower. The first sync sets the starting value and is not counted as consumption.
+
 ## Architecture
 
 ```
@@ -71,7 +78,7 @@ Home Assistant, custom_components/hydrao
   ├── ble_client.py    ← connection, history sync, live polling (2 s)
   ├── coordinator.py   ← push callbacks to the entities
   ├── config_flow.py   ← passive BLE discovery only (no manual input)
-  ├── sensor.py        ← 12 sensors
+  ├── sensor.py        ← 13 sensors
   └── binary_sensor.py ← shower in progress
 ```
 
