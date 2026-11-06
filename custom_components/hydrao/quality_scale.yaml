@@ -8,7 +8,7 @@ rules:
     comment: Push integration via BLE callbacks — no polling interval.
   brands:
     status: done
-    comment: icon.png present in repository root.
+    comment: Icon shipped in custom_components/hydrao/brand/.
   common-modules:
     status: done
   config-flow-test-coverage:

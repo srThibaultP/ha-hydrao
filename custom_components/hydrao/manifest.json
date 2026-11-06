@@ -1,19 +1,19 @@
 {
   "domain": "hydrao",
   "name": "Hydrao Shower Head",
-  "version": "1.0.1",
-  "config_flow": true,
-  "documentation": "https://github.com/srThibaultP/hydrao",
-  "issue_tracker": "https://github.com/srThibaultP/hydrao/issues",
-  "requirements": [],
   "bluetooth": [
     {
       "local_name": "HYDRAO_SHOWER*",
       "connectable": true
     }
   ],
-  "dependencies": ["bluetooth", "bluetooth_adapters"],
   "codeowners": ["@srThibaultP"],
+  "config_flow": true,
+  "dependencies": ["bluetooth", "bluetooth_adapters"],
+  "documentation": "https://github.com/srThibaultP/ha-hydrao",
+  "integration_type": "device",
   "iot_class": "local_push",
-  "integration_type": "device"
+  "issue_tracker": "https://github.com/srThibaultP/ha-hydrao/issues",
+  "requirements": [],
+  "version": "1.0.2"
 }

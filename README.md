@@ -1,102 +1,105 @@
-# Hydrao — Custom Component Home Assistant
+# Hydrao for Home Assistant
 
-Intégration Home Assistant pour les pommeaux de douche connectés **Hydrao**.
+*[Français](README.fr.md)*
 
-La communication BLE est gérée directement par HA via son subsystem Bluetooth natif.
+Home Assistant custom integration for **Hydrao** connected shower heads.
 
-## Prérequis
+Bluetooth LE is handled directly by Home Assistant through its native Bluetooth stack.
 
-- Home Assistant ≥ 2024.1 avec le subsystem **Bluetooth** activé
-- Un adaptateur Bluetooth sur la machine qui fait tourner HA (Raspberry Pi, NUC, etc.)
-- Le pommeau Hydrao
+## Requirements
+
+- Home Assistant 2024.1 or later with **Bluetooth** enabled
+- A Bluetooth adapter on the machine running Home Assistant (or an ESPHome Bluetooth proxy, see below)
+- A Hydrao shower head
 
 ## Installation
 
-### Via HACS (recommandé)
+### Marketplace / HACS (recommended)
 
-1. HACS → ⋮ → **Dépôts personnalisés** → coller l'URL du repo → catégorie **Intégration**
-2. Installer **Hydrao Shower Head**
-3. Redémarrer Home Assistant
+1. Marketplace (HACS) → ⋮ → **Custom repositories** → paste `https://github.com/srThibaultP/ha-hydrao` → category **Integration**
+2. Install **Hydrao Shower Head**
+3. Restart Home Assistant
 
-### Manuelle
+### Manual
 
 ```
 cp -r custom_components/hydrao  <config_dir>/custom_components/hydrao
 ```
-Redémarrer Home Assistant.
+
+Restart Home Assistant.
 
 ## Configuration
 
-Le pommeau Hydrao **ne broadcast en Bluetooth que pendant une douche active** — c'est normal qu'il n'apparaisse pas en dehors de ces moments.
+The shower head **only broadcasts over Bluetooth during a shower**, so it is normal not to see it the rest of the time.
 
-1. Prendre une douche (ou activer le pommeau) pour qu'il commence à émettre
-2. HA détecte automatiquement l'advertisement `HYDRAO_SHOWER*` et affiche une notification dans **Paramètres → Appareils et Services**
-3. Cliquer sur la notification → confirmer
+1. Take a shower (or run the water through the shower head) so that it starts advertising
+2. Home Assistant detects the `HYDRAO_SHOWER*` advertisement and shows a notification in **Settings → Devices & services**
+3. Click the notification and confirm
 
-Aucune saisie d'adresse MAC n'est nécessaire : l'intégration est uniquement basée sur la découverte automatique.
+No MAC address is needed: the integration relies on automatic discovery only.
 
-> **À noter :** une fois l'intégration ajoutée, les entités existent immédiatement mais restent **indisponibles** (grisées) tant qu'aucune douche n'est en cours. Elles repassent disponibles dès la prochaine utilisation du pommeau.
+> **Note:** once the integration is added, the entities exist right away but stay **unavailable** while no shower is running. They become available again the next time the shower head is used.
 
-## Entités créées (par pommeau)
+## Entities (per shower head)
 
-| Entité | Type | Description |
+| Entity | Type | Description |
 |--------|------|-------------|
-| `sensor.live_volume` | Sensor | Volume en cours (L) |
-| `sensor.live_flow` | Sensor | Débit instantané (L/min) |
-| `sensor.live_temperature` | Sensor | Température eau en cours (°C) |
-| `sensor.live_duration` | Sensor | Durée douche en cours (s) |
-| `sensor.last_shower_volume` | Sensor | Volume dernière douche (L) |
-| `sensor.last_shower_temperature` | Sensor | Température dernière douche (°C) |
-| `sensor.last_shower_flow` | Sensor | Débit moyen dernière douche (L/min) |
-| `sensor.last_shower_duration` | Sensor | Durée dernière douche (s) |
-| `sensor.last_shower_soaping_time` | Sensor | Temps savonnage (s) |
-| `sensor.last_shower_date` | Sensor | Horodatage dernière douche |
-| `binary_sensor.is_showering` | Binary Sensor | Douche en cours (ON/OFF) |
-| `sensor.rssi` *(Diagnostic)* | Sensor | Signal BLE (dBm) |
-| `sensor.firmware_version` *(Diagnostic)* | Sensor | Version firmware |
+| `sensor.live_volume` | Sensor | Current volume (L) |
+| `sensor.live_flow` | Sensor | Instant flow rate (L/min) |
+| `sensor.live_temperature` | Sensor | Current water temperature (°C) |
+| `sensor.live_duration` | Sensor | Current shower duration (s) |
+| `sensor.last_shower_volume` | Sensor | Last shower volume (L) |
+| `sensor.last_shower_temperature` | Sensor | Last shower temperature (°C) |
+| `sensor.last_shower_flow` | Sensor | Last shower average flow rate (L/min) |
+| `sensor.last_shower_duration` | Sensor | Last shower duration (s) |
+| `sensor.last_shower_soaping_time` | Sensor | Soaping time (s) |
+| `sensor.last_shower_date` | Sensor | Last shower timestamp |
+| `binary_sensor.is_showering` | Binary sensor | Shower in progress (on/off) |
+| `sensor.rssi` *(Diagnostic)* | Sensor | BLE signal (dBm) |
+| `sensor.firmware_version` *(Diagnostic)* | Sensor | Firmware version |
 
-Tous les capteurs numériques (volume, débit, température, durées) affichent **2 décimales maximum**.
-Les capteurs marqués *Diagnostic* apparaissent dans une section repliée à part sur la fiche de l'appareil.
+All numeric sensors (volume, flow, temperature, durations) show **2 decimals at most**.
+Sensors marked *Diagnostic* appear in a separate collapsed section on the device page.
 
 ## Architecture
 
 ```
-Pommeau Hydrao (BLE — broadcast uniquement pendant une douche)
-       ↕ GATT (bleak + bleak-retry-connector, fournis par HA)
-Home Assistant — custom_components/hydrao
-  ├── protocol.py      ← décodage binaire GATT (porté de hydrao-ble-raspberry)
-  ├── ble_client.py    ← connexion, sync historique, polling live (2s)
-  ├── coordinator.py   ← push callbacks → entités HA
-  ├── config_flow.py   ← découverte BLE passive uniquement (aucune saisie manuelle)
-  ├── sensor.py        ← 12 capteurs
-  └── binary_sensor.py ← douche en cours
+Hydrao shower head (BLE, broadcasts only during a shower)
+       ↕ GATT (bleak + bleak-retry-connector, provided by Home Assistant)
+Home Assistant, custom_components/hydrao
+  ├── protocol.py      ← binary GATT decoding (ported from hydrao-ble-raspberry)
+  ├── ble_client.py    ← connection, history sync, live polling (2 s)
+  ├── coordinator.py   ← push callbacks to the entities
+  ├── config_flow.py   ← passive BLE discovery only (no manual input)
+  ├── sensor.py        ← 12 sensors
+  └── binary_sensor.py ← shower in progress
 ```
 
-L'intégration ne bloque jamais le démarrage de HA même si le pommeau est hors de portée : les entités sont créées immédiatement (indisponibles), puis un callback Bluetooth se connecte automatiquement dès la prochaine émission du pommeau.
+The integration never blocks Home Assistant startup, even when the shower head is out of range: the entities are created immediately (unavailable), then a Bluetooth callback connects as soon as the shower head advertises again.
 
-## Protocole BLE
+## BLE protocol
 
-Basé sur le code open source [hydrao-ble-raspberry](https://github.com/hydrao-opensource/hydrao-ble-raspberry) (Apache 2.0).
+Based on the open source [hydrao-ble-raspberry](https://github.com/hydrao-opensource/hydrao-ble-raspberry) code (Apache 2.0).
 
-UUIDs GATT utilisés :
+GATT UUIDs used:
 
-| Caracteristique | UUID |
-|-----------------|------|
-| UUID appareil   | `0000ca28-…` |
-| Firmware        | `00002a26-…` |
-| Hardware        | `0000ca24-…` |
-| Volume live     | `0000ca1c-…` |
-| Débit live      | `0000ca31-…` |
-| Température live| `0000ca32-…` |
-| Seuils LED      | `0000ca1d-…` |
-| Calibration     | `0000ca30-…` |
-| Plage douches   | `0000ca21-…` |
-| Requête douche  | `0000ca22-…` |
-| Données douche  | `0000ca23-…` |
+| Characteristic | UUID |
+|----------------|------|
+| Device UUID    | `0000ca28-…` |
+| Firmware       | `00002a26-…` |
+| Hardware       | `0000ca24-…` |
+| Live volume    | `0000ca1c-…` |
+| Live flow      | `0000ca31-…` |
+| Live temperature | `0000ca32-…` |
+| LED thresholds | `0000ca1d-…` |
+| Calibration    | `0000ca30-…` |
+| Shower range   | `0000ca21-…` |
+| Shower request | `0000ca22-…` |
+| Shower data    | `0000ca23-…` |
 
-## Portée BLE limitée ? Utiliser un proxy ESPHome
+## Limited BLE range? Use an ESPHome proxy
 
-Si la machine HA n'a pas de Bluetooth ou est trop loin du pommeau, un **ESP32 + ESPHome** peut servir de proxy BLE.
+If the Home Assistant machine has no Bluetooth or is too far from the shower head, an **ESP32 running ESPHome** can act as a BLE proxy.
 
 ```yaml
 esphome:
@@ -105,7 +108,7 @@ esphome:
 esp32:
   board: esp32dev
   framework:
-    type: esp-idf   # requis pour bluetooth_proxy
+    type: esp-idf   # required for bluetooth_proxy
 
 wifi:
   ssid: !secret wifi_ssid
@@ -116,17 +119,17 @@ api:
     key: !secret api_key
 
 bluetooth_proxy:
-  active: true   # requis pour autoriser les connexions GATT sortantes
+  active: true   # required to allow outgoing GATT connections
 ```
 
-## Licence
+## License
 
-Apache 2.0 — basé sur les projets open source [Hydrao](https://github.com/hydrao-opensource).
+[Apache 2.0](LICENSE), based on the open source [Hydrao](https://github.com/hydrao-opensource) projects.
 
-## Désinstallation
+## Uninstall
 
-1. **Paramètres → Appareils et Services**
-2. Cliquer sur l'intégration **Hydrao Shower Head**
-3. Cliquer sur les **⋮** → **Supprimer**
-4. Redémarrer Home Assistant
-5. Supprimer manuellement le dossier `custom_components/hydrao/` si vous n'utilisez pas HACS
+1. **Settings → Devices & services**
+2. Open the **Hydrao Shower Head** integration
+3. Click **⋮** → **Delete**
+4. Restart Home Assistant
+5. Delete the `custom_components/hydrao/` folder by hand if you are not using the Marketplace / HACS
