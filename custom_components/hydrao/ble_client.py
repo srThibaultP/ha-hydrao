@@ -5,7 +5,7 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from bleak import BleakClient
@@ -20,6 +20,7 @@ from .const import (
     DEFAULT_CALIBRATION,
     DEFAULT_THRESHOLDS,
     LIVE_EVERY_N_SHOWERS,
+    LINK_LOSS_GRACE,
     LIVE_POLL_INTERVAL,
     RESET_VOLUME_COMMAND,
     SOAPING_TIME,
@@ -103,6 +104,8 @@ class HydraoDevice:
         self._session_average_temperature: float | None = None
         self._session_start: datetime | None = None
         self._soaping_timer: asyncio.TimerHandle | None = None
+        # A lost connection only means the water stopped once it lasted
+        self._link_loss_timer: asyncio.TimerHandle | None = None
         # Date and volume of the last shower followed live, until the history
         # returns it: the history itself has no dates.
         self._finished_shower: dict[str, Any] | None = None
@@ -139,6 +142,7 @@ class HydraoDevice:
     def close(self) -> None:
         """Stop for good, when the integration is unloaded."""
         self.stop()
+        self._cancel_link_loss_timer()
         self._cancel_soaping_timer()
 
     def set_thresholds(self, thresholds: list[dict[str, Any]]) -> None:
@@ -274,15 +278,35 @@ class HydraoDevice:
         await self._live_monitor_loop(client)
 
     def _on_disconnected(self) -> None:
-        """Reset all live state when the BLE connection is lost.
+        """Handle the loss of the BLE connection.
 
         The shower head is powered by the water, so it disappears as soon as
         the water stops and we never see a natural 'volume = 0' frame at the
-        end. We must clear live values here to avoid sensors staying stuck.
+        end. A weak signal drops the connection the same way while the water
+        still runs, so the shower is only paused once the connection stayed
+        lost for a while. Until then the live values are kept.
         """
+        if not self._session_active:
+            self._clear_live()
+            self._notify_update()
+            return
+        if self._link_loss_timer is None:
+            self._link_loss_timer = asyncio.get_running_loop().call_later(
+                LINK_LOSS_GRACE, self._on_link_loss_timeout
+            )
+            _LOGGER.debug("[%s] Connection lost during a shower", self.address)
+
+    def _on_link_loss_timeout(self) -> None:
+        """The connection did not come back: the water stopped."""
+        self._link_loss_timer = None
         self._pause_session()
         self._clear_live()
         self._notify_update()
+
+    def _cancel_link_loss_timer(self) -> None:
+        if self._link_loss_timer is not None:
+            self._link_loss_timer.cancel()
+            self._link_loss_timer = None
 
     def _clear_live(self) -> None:
         self.live_volume = 0
@@ -295,8 +319,12 @@ class HydraoDevice:
 
     # ── Shower followed live ──────────────────────────────────────────────────
 
-    def _follow_shower(self, volume: int) -> None:
-        """Start a shower, or resume the one paused for soaping."""
+    def _follow_shower(self, volume: int, duration: float | None) -> None:
+        """Start a shower, or resume the one paused for soaping.
+
+        The duration is the one the shower head gives, in minutes: a shower
+        joined late still gets the date it really started.
+        """
         if not self._session_active:
             if self.is_soaping and volume >= self._session_volume:
                 self._cancel_soaping_timer()
@@ -304,7 +332,9 @@ class HydraoDevice:
                 _LOGGER.info("[%s] Shower resumed after soaping", self.address)
             else:
                 self._end_session()
-                self._session_start = datetime.now(UTC)
+                self._session_start = datetime.now(UTC) - timedelta(
+                    minutes=duration or 0
+                )
                 _LOGGER.info("[%s] Shower started", self.address)
             self._session_active = True
         self._session_volume = volume
@@ -333,13 +363,11 @@ class HydraoDevice:
 
     def _pause_session(self) -> None:
         """The water stopped: the shower is over unless it resumes in time."""
-        if not self._session_active:
-            return
         self._publish_last_shower()
         self._session_active = False
         self.is_soaping = True
         self._soaping_timer = asyncio.get_running_loop().call_later(
-            SOAPING_TIME, self._on_soaping_timeout
+            SOAPING_TIME - LINK_LOSS_GRACE, self._on_soaping_timeout
         )
         _LOGGER.info("[%s] Water stopped at %d L", self.address, self._session_volume)
 
@@ -364,6 +392,7 @@ class HydraoDevice:
         self._drop_session()
 
     def _drop_session(self) -> None:
+        self._cancel_link_loss_timer()
         self._cancel_soaping_timer()
         self.is_soaping = False
         self._session_active = False
@@ -547,6 +576,7 @@ class HydraoDevice:
         vol_data = await self._read(client, "live_volume")
         if vol_data is None:
             return
+        self._cancel_link_loss_timer()
 
         volume = proto.decode_live_volume(vol_data)
 
@@ -558,7 +588,11 @@ class HydraoDevice:
                 await self._read(client, "live_temp")
             )
 
-            self._follow_shower(volume)
+            # Like the app, the duration comes from the average flow
+            duration_flow = average_flow or flow
+            duration = volume / duration_flow if duration_flow else None  # minutes
+
+            self._follow_shower(volume, duration)
             if flow is not None:
                 self._session_flow_samples.append(flow)
             if temperature is not None:
@@ -566,15 +600,12 @@ class HydraoDevice:
             self._session_average_flow = average_flow
             self._session_average_temperature = average_temperature
 
-            # Like the app, the duration comes from the average flow
-            duration_flow = average_flow or flow
-
             self.live_volume = volume
             self.live_flow = flow
             self.live_temperature = temperature
             self.live_average_flow = average_flow
             self.live_average_temperature = average_temperature
-            self.live_duration = volume / duration_flow if duration_flow else None  # minutes
+            self.live_duration = duration
             self.is_showering = True
 
         else:
