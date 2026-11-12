@@ -10,7 +10,7 @@ rules:
       read while it is connected, which means during a shower.
   brands:
     status: done
-    comment: Icon shipped in custom_components/hydrao/brand/.
+    comment: Hydrao icon and logo shipped in custom_components/hydrao/brand/.
   common-modules:
     status: done
   config-flow-test-coverage:
@@ -73,7 +73,7 @@ rules:
     status: done
   docs-configuration-parameters:
     status: exempt
-    comment: No configuration parameters , setup is fully automatic via BLE discovery.
+    comment: No configuration parameters, the shower head is found through Bluetooth discovery.
   docs-installation-parameters:
     status: done
   entity-unavailable:
@@ -102,7 +102,7 @@ rules:
       change, and there is no network information to update.
   discovery:
     status: done
-    comment: async_step_bluetooth handles passive BLE discovery.
+    comment: async_step_bluetooth handles the Bluetooth discovery.
   docs-data-update:
     status: done
   docs-examples:
