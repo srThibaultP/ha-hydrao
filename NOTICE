@@ -1,0 +1,33 @@
+Hydrao for Home Assistant (ha-hydrao)
+
+This project includes work from the open source Hydrao projects, both under
+the Apache License, Version 2.0. Their attribution notices follow.
+
+    Hydrao-Eco
+    Copyright 2026 Hydrao
+
+    This product includes software developed by Hydrao
+    and is legally maintained at:
+    <https://github.com/hydrao-opensource/hydrao-eco>
+
+    Hydrao-Ble-Raspberry
+    Copyright 2026 Hydrao
+
+    This product includes software developed by Hydrao
+    and is legally maintained at:
+    <https://github.com/hydrao-opensource/hydrao-ble-raspberry>
+
+What comes from them, and what was changed:
+
+- custom_components/hydrao/protocol.py: decoding of the Bluetooth data,
+  ported from Hydrao-Ble-Raspberry and adapted to Home Assistant.
+- The connection steps, the LED threshold rules and colors and the soaping
+  break follow Hydrao-Eco. They were written again in Python.
+- icon.png and custom_components/hydrao/brand/icon*.png: the icon of the
+  Hydrao-Eco app (assets/icon/icon.png), resized.
+- custom_components/hydrao/brand/logo*.png: the Hydrao logo of the
+  Hydrao-Eco app (assets/splashscreen/splashscreen_branding.png), placed on
+  the blue background of the app and resized.
+
+Hydrao and its logo belong to Hydrao. This project is not affiliated with
+Hydrao.
