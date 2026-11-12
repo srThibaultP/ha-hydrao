@@ -95,7 +95,7 @@ Le bouton **Terminer la douche** est le bouton « J'ai fini ma douche » de l'ap
 
 ## Mise à jour des données
 
-Le pommeau n'a pas de pile, il est alimenté par le passage de l'eau : il n'est joignable que pendant une douche. Quand il émet, Home Assistant se connecte, lit les versions et les réglages, envoie les changements en attente, lit une fois la douche en cours, lit dans l'historique les douches qu'il ne connaît pas, puis interroge les valeurs en direct toutes les 2 secondes. Quand l'eau s'arrête, la connexion se perd et les valeurs en direct sont remises à zéro. Rien n'est interrogé entre deux douches.
+Le pommeau n'a pas de pile, il est alimenté par le passage de l'eau : il n'est joignable que pendant une douche. Quand il émet, Home Assistant se connecte, lit les versions et les réglages, envoie les changements en attente, lit une fois la douche en cours, lit dans l'historique les douches qu'il ne connaît pas, puis interroge les valeurs en direct toutes les 2 secondes. Quand l'eau s'arrête, la connexion se perd. Un signal faible la fait perdre aussi : la douche reste donc en cours avec ses dernières valeurs pendant 20 secondes, puis les valeurs en direct sont remises à zéro et la pause savonnage commence. Rien n'est interrogé entre deux douches.
 
 ## Cas d'usage et exemples
 

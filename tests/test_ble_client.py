@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 import struct
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -39,6 +40,14 @@ def make_device() -> HydraoDevice:
     device = HydraoDevice(MagicMock(address=ADDRESS, name="Shower"), rssi=-60)
     device.name = "Shower"
     return device
+
+
+def water_stopped(device: HydraoDevice) -> None:
+    """Lose the connection for longer than a weak signal would."""
+    device._on_disconnected()
+    assert device._link_loss_timer is not None
+    device._cancel_link_loss_timer()
+    device._on_link_loss_timeout()
 
 
 def history_client(first: int, last: int, volumes: dict[int, int]) -> FakeClient:
@@ -392,7 +401,7 @@ async def test_live_averages() -> None:
     assert device.live_average_temperature == 35
     assert device.live_duration == pytest.approx(1)
 
-    device._on_disconnected()
+    water_stopped(device)
     assert device.last_shower is not None
     assert device.last_shower["flow"] == pytest.approx(12)
     assert device.last_shower["temperature"] == 35
@@ -437,7 +446,7 @@ async def test_disconnect_during_shower() -> None:
     await run_live(device, live_client([15]), 1)
     assert device.is_showering is True
 
-    device._on_disconnected()
+    water_stopped(device)
     assert device.is_showering is False
     assert device.is_soaping is True
     assert device.live_volume == 0
@@ -452,11 +461,70 @@ async def test_disconnect_during_shower() -> None:
     assert device._soaping_timer is None
 
 
+async def test_short_connection_loss_keeps_the_shower() -> None:
+    """A weak signal drops the connection without pausing the shower."""
+    device = make_device()
+    callback, received = snapshot_collector()
+    device.register_callback(callback)
+    await run_live(device, live_client([15]), 1)
+    count = len(received)
+
+    device._on_disconnected()
+    timer = device._link_loss_timer
+    assert timer is not None
+    device._on_disconnected()
+    assert device._link_loss_timer is timer
+    assert device.is_showering is True
+    assert device.is_soaping is False
+    assert device.live_volume == 15
+    assert device.last_shower is None
+    assert len(received) == count
+
+    await run_live(device, live_client([18]), 1)
+    assert device._link_loss_timer is None
+    assert device.live_volume == 18
+    assert device.is_showering is True
+    device.close()
+
+
+async def test_long_connection_loss_pauses_the_shower() -> None:
+    """The connection staying lost means the water stopped."""
+    device = make_device()
+    await run_live(device, live_client([15]), 1)
+    with patch("custom_components.hydrao.ble_client.LINK_LOSS_GRACE", 0):
+        device._on_disconnected()
+        await asyncio.sleep(0.01)
+    assert device._link_loss_timer is None
+    assert device.is_showering is False
+    assert device.is_soaping is True
+    assert device.last_shower is not None
+    assert device.last_shower["volume"] == 15
+
+    device._on_disconnected()
+    assert device._link_loss_timer is None
+    device.close()
+
+
+async def test_shower_joined_late_gets_its_real_start() -> None:
+    """The date is the start of the shower, not of the connection."""
+    device = make_device()
+    device.calibration = 500
+    client = live_client([24])
+    client.values[CHAR["live_flow"]] = struct.pack("<HH", 100, 200)
+    before = datetime.now(UTC)
+    await run_live(device, client, 1)
+    assert device.live_duration == pytest.approx(2)
+    assert device._session_start is not None
+    assert device._session_start <= before - timedelta(minutes=2) + timedelta(seconds=1)
+    assert device._session_start >= before - timedelta(minutes=2, seconds=1)
+    device.close()
+
+
 async def test_shower_resumes_after_soaping() -> None:
     """Water back within the soaping time goes on with the same shower."""
     device = make_device()
     await run_live(device, live_client([15]), 1)
-    device._on_disconnected()
+    water_stopped(device)
     assert device.last_shower is not None
     date = device.last_shower["date"]
 
@@ -464,7 +532,7 @@ async def test_shower_resumes_after_soaping() -> None:
     assert device.is_soaping is False
     assert device.is_showering is True
     assert device._soaping_timer is None
-    device._on_disconnected()
+    water_stopped(device)
     assert device.last_shower["volume"] == 22
     assert device.last_shower["date"] == date
     device.close()
@@ -477,7 +545,7 @@ async def test_soaping_times_out() -> None:
     device.register_callback(callback)
     await run_live(device, live_client([15]), 1)
     with patch("custom_components.hydrao.ble_client.SOAPING_TIME", 0):
-        device._on_disconnected()
+        water_stopped(device)
     assert received[-1]["is_soaping"] is True
     await asyncio.sleep(0.01)
     assert received[-1]["is_soaping"] is False
@@ -490,14 +558,14 @@ async def test_new_shower_during_soaping() -> None:
     """A lower volume during the soaping time is another shower."""
     device = make_device()
     await run_live(device, live_client([15]), 1)
-    device._on_disconnected()
+    water_stopped(device)
     assert device.last_shower is not None
     date = device.last_shower["date"]
 
     await run_live(device, live_client([3]), 1)
     assert device.is_soaping is False
     assert device._finished_shower == {"date": date, "volume": 15}
-    device._on_disconnected()
+    water_stopped(device)
     assert device.last_shower["volume"] == 3
     device.close()
 
@@ -665,7 +733,7 @@ async def test_connection_from_start_to_end() -> None:
 
     with patch("custom_components.hydrao.ble_client.asyncio.sleep", tick):
         await device._on_connected(client)  # type: ignore[arg-type]
-    device._on_disconnected()
+    water_stopped(device)
 
     assert client.writes == [
         (CHAR["thresholds"], encode_thresholds(NEW_THRESHOLDS)),

@@ -96,7 +96,7 @@ The **End shower** button is the "I have finished my shower" button of the app. 
 
 ## How data is updated
 
-The shower head has no battery and is powered by the water flow, so it can only be reached during a shower. When it starts advertising, Home Assistant connects, reads the versions and settings, sends the pending changes, reads the running shower once, reads the showers it does not know yet from the history, then polls the live values every 2 seconds. When the water stops the connection is lost and the live values are cleared. Nothing is polled between showers.
+The shower head has no battery and is powered by the water flow, so it can only be reached during a shower. When it starts advertising, Home Assistant connects, reads the versions and settings, sends the pending changes, reads the running shower once, reads the showers it does not know yet from the history, then polls the live values every 2 seconds. When the water stops the connection is lost. A weak signal loses it too, so the shower stays in progress with its last values for 20 seconds, then the live values are cleared and the soaping break starts. Nothing is polled between showers.
 
 ## Use cases and examples
 

@@ -30,6 +30,7 @@ MIN_VALID_VOLUME = 3        # liters
 LEGACY_FLOW = 6.8           # L/min for hw_version < 8
 LIVE_POLL_INTERVAL = 2      # seconds between live reads
 SOAPING_TIME = 120          # seconds the water can stay off within one shower
+LINK_LOSS_GRACE = 20        # seconds a lost connection is not yet a water stop
 LIVE_EVERY_N_SHOWERS = 5    # live read between showers of the history sync
 RESET_VOLUME_COMMAND = b"\x01"
 CONNECT_TIMEOUT = 10        # seconds
