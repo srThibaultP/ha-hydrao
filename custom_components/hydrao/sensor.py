@@ -203,6 +203,7 @@ SENSOR_DESCRIPTIONS: tuple[HydraoSensorDescription, ...] = (
         key=SENSOR_CALIBRATION,
         translation_key=SENSOR_CALIBRATION,
         entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
         value_key="calibration",
     ),
 )

@@ -70,7 +70,7 @@ No MAC address is needed: the integration relies on automatic discovery only.
 | `select.threshold_1_color` to `_4_color` *(Configuration)* | Select | Color of each LED threshold |
 | `sensor.rssi` *(Diagnostic, disabled by default)* | Sensor | BLE signal (dBm) |
 | `sensor.firmware_version` *(Diagnostic)* | Sensor | Firmware version |
-| `sensor.calibration` *(Diagnostic)* | Sensor | Flow calibration stored in the shower head |
+| `sensor.calibration` *(Diagnostic, disabled by default)* | Sensor | Flow calibration stored in the shower head |
 
 All numeric sensors (volume, flow, temperature, durations) show **2 decimals at most**.
 Sensors marked *Diagnostic* appear in a separate collapsed section on the device page.

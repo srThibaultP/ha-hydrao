@@ -69,7 +69,7 @@ Aucune saisie d'adresse MAC n'est nécessaire : l'intégration est uniquement ba
 | `select.threshold_1_color` à `_4_color` *(Configuration)* | Select | Couleur de chaque seuil LED |
 | `sensor.rssi` *(Diagnostic, désactivé par défaut)* | Sensor | Signal BLE (dBm) |
 | `sensor.firmware_version` *(Diagnostic)* | Sensor | Version firmware |
-| `sensor.calibration` *(Diagnostic)* | Sensor | Calibration du débit enregistrée dans le pommeau |
+| `sensor.calibration` *(Diagnostic, désactivé par défaut)* | Sensor | Calibration du débit enregistrée dans le pommeau |
 
 Tous les capteurs numériques (volume, débit, température, durées) affichent **2 décimales maximum**.
 Les capteurs marqués *Diagnostic* apparaissent dans une section repliée à part sur la fiche de l'appareil.

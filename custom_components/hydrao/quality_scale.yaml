@@ -4,8 +4,10 @@ rules:
     status: exempt
     comment: No service actions are provided by this integration.
   appropriate-polling:
-    status: done
-    comment: Push integration via BLE callbacks , no polling interval.
+    status: exempt
+    comment: >
+      Push integration, Home Assistant polls nothing. The shower head is only
+      read while it is connected, which means during a shower.
   brands:
     status: done
     comment: Icon shipped in custom_components/hydrao/brand/.
@@ -21,15 +23,23 @@ rules:
   docs-actions:
     status: exempt
     comment: No service actions are provided by this integration.
+  docs-conditions:
+    status: exempt
+    comment: No conditions are provided by this integration.
   docs-high-level-description:
     status: done
   docs-installation-instructions:
     status: done
   docs-removal-instructions:
     status: done
+  docs-triggers:
+    status: exempt
+    comment: No triggers are provided by this integration.
   entity-event-setup:
-    status: done
-    comment: BLE callbacks registered in async_setup_entry via entry.async_on_unload.
+    status: exempt
+    comment: >
+      Entities subscribe to nothing, they only read the coordinator. The
+      Bluetooth callbacks belong to the config entry and are removed with it.
   entity-unique-id:
     status: done
   has-entity-name:
@@ -42,15 +52,23 @@ rules:
       The showerhead only advertises during an active shower; it is unreachable
       most of the time, so a connection test during config flow is not possible.
   test-before-setup:
-    status: done
-    comment: Setup never raises ConfigEntryNotReady; entities start unavailable.
+    status: exempt
+    comment: >
+      The shower head is powered by the water and is off between showers, so
+      there is nothing to test at setup. Raising ConfigEntryNotReady would
+      keep the entry failing most of the time. Entities start unavailable and
+      a Bluetooth callback connects at the next shower.
   unique-config-entry:
     status: done
 
   # Silver
   action-exceptions:
     status: exempt
-    comment: No service actions are provided by this integration.
+    comment: >
+      No service actions are provided by this integration, and the entity
+      actions (button, numbers, selects) only queue a request for the next
+      connection, which cannot fail. Out of range values are refused by Home
+      Assistant itself.
   config-entry-unloading:
     status: done
   docs-configuration-parameters:
@@ -78,8 +96,10 @@ rules:
   diagnostics:
     status: done
   discovery-update-info:
-    status: done
-    comment: update_ble_device() called on every BLE advertisement callback.
+    status: exempt
+    comment: >
+      The device is identified by its Bluetooth address, which does not
+      change, and there is no network information to update.
   discovery:
     status: done
     comment: async_step_bluetooth handles passive BLE discovery.
@@ -106,7 +126,7 @@ rules:
     status: done
   entity-disabled-by-default:
     status: done
-    comment: The BLE signal sensor is disabled by default.
+    comment: The BLE signal and flow calibration sensors are disabled by default.
   entity-translations:
     status: done
   exception-translations:

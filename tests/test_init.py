@@ -13,7 +13,7 @@ from custom_components.hydrao.diagnostics import async_get_config_entry_diagnost
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import STATE_OFF, STATE_ON, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.util import dt as dt_util
 
 from .conftest import ADDRESS, NAME, make_service_info
@@ -58,9 +58,56 @@ async def test_rssi_disabled_by_default(
     entity_registry: er.EntityRegistry,
     init_integration: MockConfigEntry,
 ) -> None:
-    """The signal sensor has to be enabled by hand."""
-    entry = entity_registry.async_get(f"sensor.{PREFIX}_ble_signal_strength")
-    assert entry.disabled_by is er.RegistryEntryDisabler.INTEGRATION
+    """The signal and calibration sensors have to be enabled by hand."""
+    for entity_id in (f"sensor.{PREFIX}_ble_signal_strength", CALIBRATION):
+        entry = entity_registry.async_get(entity_id)
+        assert entry.disabled_by is er.RegistryEntryDisabler.INTEGRATION
+
+
+async def test_device_is_completed_by_the_shower_head(
+    hass: HomeAssistant,
+    device_registry: dr.DeviceRegistry,
+    init_integration: MockConfigEntry,
+) -> None:
+    """Versions and serial number reach the device once they are read."""
+    (device,) = dr.async_entries_for_config_entry(
+        device_registry, init_integration.entry_id
+    )
+    assert device.identifiers == {(DOMAIN, ADDRESS)}
+    assert device.connections == {(dr.CONNECTION_BLUETOOTH, ADDRESS)}
+    assert device.manufacturer == "Hydrao"
+    assert device.model == "Shower head"
+    assert device.sw_version is None
+    assert device.hw_version is None
+    assert device.serial_number is None
+
+    push(init_integration, fw_version="1.3", hw_version=9, uuid="0102-0304")
+    await hass.async_block_till_done()
+    (device,) = dr.async_entries_for_config_entry(
+        device_registry, init_integration.entry_id
+    )
+    assert device.sw_version == "1.3"
+    assert device.hw_version == "9"
+    assert device.serial_number == "0102-0304"
+
+
+async def test_device_knows_its_versions_after_a_restart(
+    hass: HomeAssistant,
+    device_registry: dr.DeviceRegistry,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Restored versions are on the device before the next shower."""
+    mock_config_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        mock_config_entry, options={"fw_version": "1.2", "hw_version": 9}
+    )
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    (device,) = dr.async_entries_for_config_entry(
+        device_registry, mock_config_entry.entry_id
+    )
+    assert device.sw_version == "1.2"
+    assert device.hw_version == "9"
 
 
 async def test_restored_metadata_and_history(
@@ -188,7 +235,6 @@ async def test_values(
         live_flow=7.126,
         live_average_flow=6.5,
         live_average_temperature=37.25,
-        calibration=600,
         last_shower={
             "volume": 40,
             "temperature": None,
@@ -205,7 +251,6 @@ async def test_values(
     assert hass.states.get(LIVE_FLOW).state == "7.13"
     assert hass.states.get(AVERAGE_FLOW).state == "6.5"
     assert hass.states.get(AVERAGE_TEMPERATURE).state == "37.25"
-    assert hass.states.get(CALIBRATION).state == "600"
     assert float(hass.states.get(SOAPING).state) == 1.5
     assert hass.states.get(DATE).state == date.isoformat()
     state = hass.states.get(TOTAL)

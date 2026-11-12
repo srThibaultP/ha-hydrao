@@ -2,6 +2,7 @@
 
 DOMAIN = "hydrao"
 MANUFACTURER = "Hydrao"
+MODEL = "Shower head"
 DEVICE_NAME_PREFIX = "HYDRAO_SHOWER"
 
 # ── GATT UUIDs ───────────────────────────────────────────────────────────────

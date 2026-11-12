@@ -4,11 +4,11 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.const import EntityCategory
-from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH, DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, MANUFACTURER
-from .coordinator import HydraoCoordinator
+from .const import DOMAIN, MANUFACTURER, MODEL
+from .coordinator import HydraoCoordinator, device_details
 
 
 class HydraoEntity(CoordinatorEntity[HydraoCoordinator]):
@@ -21,12 +21,15 @@ class HydraoEntity(CoordinatorEntity[HydraoCoordinator]):
         super().__init__(coordinator)
         device = coordinator.device
         self._attr_unique_id = f"{device.address}_{key}"
+        # The versions and the serial number are only known once the shower
+        # head was reached: the coordinator completes the device then.
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, device.address)},
+            connections={(CONNECTION_BLUETOOTH, device.address)},
             name=device.name,
             manufacturer=MANUFACTURER,
-            model=f"HW v{device.hw_version}" if device.hw_version else "Shower Head",
-            sw_version=device.fw_version,
+            model=MODEL,
+            **device_details(device),
         )
 
     @property
