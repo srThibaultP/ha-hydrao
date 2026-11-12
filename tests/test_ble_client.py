@@ -9,11 +9,24 @@ from bleak.exc import BleakError
 import pytest
 
 from custom_components.hydrao.ble_client import FAILURES_BEFORE_WARNING, HydraoDevice
-from custom_components.hydrao.const import CHAR, LEGACY_FLOW
+from custom_components.hydrao.const import (
+    CHAR,
+    DEFAULT_THRESHOLDS,
+    LEGACY_FLOW,
+    RESET_VOLUME_COMMAND,
+)
+from custom_components.hydrao.protocol import encode_thresholds
 
 from .conftest import ADDRESS, FakeClient, snapshot_collector
 
 ESTABLISH = "custom_components.hydrao.ble_client.establish_connection"
+
+NEW_THRESHOLDS = [
+    {"color": "#FAB900", "liter": 8.0},
+    {"color": "#FF5000", "liter": 16.0},
+    {"color": "#FF0000", "liter": 24.0},
+    {"color": "#000000", "liter": 32.0},
+]
 
 
 def shower_frame(shower_id: int, volume: int) -> bytes:
@@ -109,7 +122,20 @@ async def test_metadata_read_and_thresholds_kept() -> None:
     assert device.fw_version == "1.2.3"
     assert device.calibration == 600
     assert device.thresholds[0]["liter"] == 5
+    assert device.thresholds_known is True
     assert client.writes == []
+
+
+async def test_metadata_thresholds_are_sorted() -> None:
+    """Thresholds are kept in the order of their volumes."""
+    device = make_device()
+    client = FakeClient(
+        {"thresholds": encode_thresholds(list(reversed(DEFAULT_THRESHOLDS)))}
+    )
+    for name in ("uuid", "hw_version", "fw_version", "calibration"):
+        client.values[CHAR[name]] = b""
+    await device._read_metadata(client)  # type: ignore[arg-type]
+    assert device.thresholds == DEFAULT_THRESHOLDS
 
 
 async def test_metadata_empty_thresholds_are_written() -> None:
@@ -125,7 +151,9 @@ async def test_metadata_empty_thresholds_are_written() -> None:
         }
     )
     await device._read_metadata(client)  # type: ignore[arg-type]
-    assert client.writes[0][0] == CHAR["thresholds"]
+    assert client.writes == [(CHAR["thresholds"], encode_thresholds(DEFAULT_THRESHOLDS))]
+    assert device.thresholds == DEFAULT_THRESHOLDS
+    assert device.thresholds_known is True
 
 
 async def test_metadata_unreadable() -> None:
@@ -137,6 +165,7 @@ async def test_metadata_unreadable() -> None:
     await device._read_metadata(client)  # type: ignore[arg-type]
     assert device.uuid is None
     assert device.fw_version is None
+    assert device.thresholds_known is False
 
 
 async def test_write_failure_is_reported() -> None:
@@ -162,6 +191,52 @@ async def test_sync_counts_each_shower_once(no_sleep: AsyncMock) -> None:
 
     await device._sync_history(client)  # type: ignore[arg-type]
     assert device.total_volume == 70
+
+
+async def test_sync_skips_empty_showers_for_good(no_sleep: AsyncMock) -> None:
+    """An empty shower at the end is not asked again at each connection."""
+    device = make_device()
+    await device._sync_history(history_client(1, 3, {1: 10}))  # type: ignore[arg-type]
+    assert device.total_volume == 10
+    assert device.last_sync_max_index == 3
+
+
+async def test_sync_reads_live_during_a_long_history(no_sleep: AsyncMock) -> None:
+    """The running shower is refreshed every few showers."""
+    device = make_device()
+    device._live_tick = AsyncMock()  # type: ignore[method-assign]
+    client = history_client(1, 11, dict.fromkeys(range(1, 12), 10))
+    await device._sync_history(client)  # type: ignore[arg-type]
+    assert device._live_tick.await_count == 2
+    assert device.total_volume == 110
+
+
+async def test_sync_dates_the_shower_followed_live(no_sleep: AsyncMock) -> None:
+    """The history has no dates, the shower followed live gives its own."""
+    device = make_device()
+    await run_live(device, live_client([10, 30, 0]), 3)
+    assert device.last_shower is not None
+    date = device.last_shower["date"]
+    assert device.last_shower["soaping_time"] is None
+
+    await device._sync_history(history_client(1, 2, {1: 12, 2: 31}))  # type: ignore[arg-type]
+    assert device.last_shower["volume"] == 31
+    assert device.last_shower["soaping_time"] == 60
+    assert device.last_shower["date"] == date
+
+    # The date is used once
+    await device._sync_history(history_client(1, 3, {3: 50}))  # type: ignore[arg-type]
+    assert device.last_shower["date"] is None
+
+
+async def test_sync_does_not_date_another_shower(no_sleep: AsyncMock) -> None:
+    """A smaller shower is not the one that was followed live."""
+    device = make_device()
+    await run_live(device, live_client([10, 30, 0]), 3)
+    await device._sync_history(history_client(1, 1, {1: 12}))  # type: ignore[arg-type]
+    assert device.last_shower is not None
+    assert device.last_shower["volume"] == 12
+    assert device.last_shower["date"] is None
 
 
 async def test_sync_adds_new_showers_only(no_sleep: AsyncMock) -> None:
@@ -233,14 +308,16 @@ async def test_sync_notification_timeout(no_sleep: AsyncMock) -> None:
 
 
 async def test_sync_unreadable_shower(no_sleep: AsyncMock) -> None:
-    """A shower that can not be read is not counted."""
+    """A shower that can not be read is asked again at the next connection."""
     device = make_device()
     client = FakeClient(
-        {"shower_range": struct.pack("<HH", 1, 1), "shower_data": BleakError("x")}  # type: ignore[dict-item]
+        {"shower_range": struct.pack("<HH", 1, 2), "shower_data": BleakError("x")}  # type: ignore[dict-item]
     )
     client.start_notify.side_effect = BleakError("no notify")
     await device._sync_history(client)  # type: ignore[arg-type]
     assert device.total_volume is None
+    assert device.last_sync_max_index is None
+    assert len(client.writes) == 1
 
 
 def live_client(volumes: list[int], hw_flow: int = 100) -> FakeClient:
@@ -298,6 +375,29 @@ async def test_live_shower() -> None:
     assert device.last_shower["volume"] == 20
     assert device.last_shower["temperature"] == 38
     assert device.last_shower["duration"] is not None
+    assert device.is_soaping is False
+
+
+async def test_live_averages() -> None:
+    """The averages of the shower head are shown and give the duration."""
+    device = make_device()
+    device.calibration = 500
+    client = live_client([12])
+    client.values[CHAR["live_flow"]] = struct.pack("<HH", 100, 200)
+    client.values[CHAR["live_temp"]] = struct.pack("<HH", 76, 70)
+    await run_live(device, client, 1)
+    assert device.live_flow == pytest.approx(24)
+    assert device.live_average_flow == pytest.approx(12)
+    assert device.live_temperature == 38
+    assert device.live_average_temperature == 35
+    assert device.live_duration == pytest.approx(1)
+
+    device._on_disconnected()
+    assert device.last_shower is not None
+    assert device.last_shower["flow"] == pytest.approx(12)
+    assert device.last_shower["temperature"] == 35
+    assert device.live_average_flow is None
+    device.close()
 
 
 async def test_live_read_failure_is_retried() -> None:
@@ -315,6 +415,7 @@ async def test_live_legacy_hardware() -> None:
     device.hw_version = 7
     await run_live(device, live_client([10]), 1)
     assert device.live_flow == LEGACY_FLOW
+    assert device.live_average_flow == LEGACY_FLOW
 
 
 async def test_live_without_flow_and_temperature() -> None:
@@ -338,9 +439,169 @@ async def test_disconnect_during_shower() -> None:
 
     device._on_disconnected()
     assert device.is_showering is False
+    assert device.is_soaping is True
     assert device.live_volume == 0
     assert device.last_shower is not None
     assert device.last_shower["volume"] == 15
+
+    # A second disconnection changes nothing
+    timer = device._soaping_timer
+    device._on_disconnected()
+    assert device._soaping_timer is timer
+    device.close()
+    assert device._soaping_timer is None
+
+
+async def test_shower_resumes_after_soaping() -> None:
+    """Water back within the soaping time goes on with the same shower."""
+    device = make_device()
+    await run_live(device, live_client([15]), 1)
+    device._on_disconnected()
+    assert device.last_shower is not None
+    date = device.last_shower["date"]
+
+    await run_live(device, live_client([15, 22]), 2)
+    assert device.is_soaping is False
+    assert device.is_showering is True
+    assert device._soaping_timer is None
+    device._on_disconnected()
+    assert device.last_shower["volume"] == 22
+    assert device.last_shower["date"] == date
+    device.close()
+
+
+async def test_soaping_times_out() -> None:
+    """Water off for too long closes the shower."""
+    device = make_device()
+    callback, received = snapshot_collector()
+    device.register_callback(callback)
+    await run_live(device, live_client([15]), 1)
+    with patch("custom_components.hydrao.ble_client.SOAPING_TIME", 0):
+        device._on_disconnected()
+    assert received[-1]["is_soaping"] is True
+    await asyncio.sleep(0.01)
+    assert received[-1]["is_soaping"] is False
+    assert device._soaping_timer is None
+    assert device._finished_shower is not None
+    assert device._finished_shower["volume"] == 15
+
+
+async def test_new_shower_during_soaping() -> None:
+    """A lower volume during the soaping time is another shower."""
+    device = make_device()
+    await run_live(device, live_client([15]), 1)
+    device._on_disconnected()
+    assert device.last_shower is not None
+    date = device.last_shower["date"]
+
+    await run_live(device, live_client([3]), 1)
+    assert device.is_soaping is False
+    assert device._finished_shower == {"date": date, "volume": 15}
+    device._on_disconnected()
+    assert device.last_shower["volume"] == 3
+    device.close()
+
+
+async def test_end_shower_while_showering() -> None:
+    """Ending a running shower closes it and resets the volume."""
+    device = make_device()
+    client = live_client([15, 16])
+    await run_live(device, client, 1)
+
+    device.end_shower()
+    assert device.need_reset_volume is True
+    assert device.last_shower is not None
+    assert device.last_shower["volume"] == 15
+    assert device.as_dict()["reset_volume_pending"] is True
+
+    # The loop sends the reset and leaves, the shower head restarts
+    client.is_connected = True
+    await run_live(device, client, 5)
+    assert client.writes == [(CHAR["reset_volume"], RESET_VOLUME_COMMAND)]
+    assert device.need_reset_volume is False
+    device._on_disconnected()
+    assert device.is_soaping is False
+    assert device.last_shower["volume"] == 15
+
+
+async def test_end_shower_while_soaping() -> None:
+    """Ending a paused shower stops the soaping and waits for the shower head."""
+    device = make_device()
+    await run_live(device, live_client([15]), 1)
+    device._on_disconnected()
+
+    device.end_shower()
+    assert device.is_soaping is False
+    assert device._soaping_timer is None
+    assert device.need_reset_volume is True
+
+
+async def test_reset_is_sent_even_when_not_acknowledged() -> None:
+    """The shower head restarts on a reset and may not answer."""
+    device = make_device()
+    device.need_reset_volume = True
+    client = FakeClient()
+    client.write_gatt_char = AsyncMock(side_effect=BleakError("gone"))  # type: ignore[method-assign]
+    assert await device._send_requests(client) is True  # type: ignore[arg-type]
+    assert device.need_reset_volume is False
+
+
+async def test_thresholds_request() -> None:
+    """New thresholds wait for the shower head, then are written."""
+    device = make_device()
+    callback, received = snapshot_collector()
+    device.register_callback(callback)
+
+    device.set_thresholds(NEW_THRESHOLDS)
+    assert received[-1]["thresholds"] == NEW_THRESHOLDS
+    assert received[-1]["thresholds_pending"] is True
+
+    client = FakeClient()
+    assert await device._send_requests(client) is False  # type: ignore[arg-type]
+    assert client.writes == [(CHAR["thresholds"], encode_thresholds(NEW_THRESHOLDS))]
+    assert device.thresholds == NEW_THRESHOLDS
+    assert device.thresholds_known is True
+    assert received[-1]["thresholds_pending"] is False
+
+
+async def test_thresholds_request_kept_until_written() -> None:
+    """A failed write is tried again at the next occasion."""
+    device = make_device()
+    device.set_thresholds(NEW_THRESHOLDS)
+    client = FakeClient()
+    client.write_gatt_char = AsyncMock(side_effect=BleakError("x"))  # type: ignore[method-assign]
+    assert await device._send_requests(client) is False  # type: ignore[arg-type]
+    assert device.threshold_request == NEW_THRESHOLDS
+    assert device.thresholds == DEFAULT_THRESHOLDS
+
+
+async def test_thresholds_request_already_applied() -> None:
+    """Asking for the current thresholds writes nothing."""
+    device = make_device()
+    device.set_thresholds(NEW_THRESHOLDS)
+    device.set_thresholds([dict(threshold) for threshold in DEFAULT_THRESHOLDS])
+    assert device.threshold_request is None
+
+    device.threshold_request = list(DEFAULT_THRESHOLDS)
+    client = FakeClient()
+    await device._send_requests(client)  # type: ignore[arg-type]
+    assert client.writes == []
+    assert device.threshold_request is None
+
+
+async def test_thresholds_changed_again_during_the_write() -> None:
+    """A request made while another is written is not lost."""
+    device = make_device()
+    device.set_thresholds(NEW_THRESHOLDS)
+    client = FakeClient()
+
+    async def write(uuid: str, data: bytes, response: bool) -> None:
+        device.threshold_request = list(DEFAULT_THRESHOLDS)
+
+    client.write_gatt_char = write  # type: ignore[method-assign]
+    await device._send_requests(client)  # type: ignore[arg-type]
+    assert device.thresholds == NEW_THRESHOLDS
+    assert device.threshold_request == DEFAULT_THRESHOLDS
 
 
 async def test_connect_and_run() -> None:
@@ -360,10 +621,76 @@ async def test_on_connected_order() -> None:
     device = make_device()
     manager = MagicMock()
     device._read_metadata = manager.metadata = AsyncMock()  # type: ignore[method-assign]
+    device._send_requests = manager.requests = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    device._live_tick = manager.tick = AsyncMock()  # type: ignore[method-assign]
     device._sync_history = manager.sync = AsyncMock()  # type: ignore[method-assign]
     device._live_monitor_loop = manager.live = AsyncMock()  # type: ignore[method-assign]
     await device._on_connected(MagicMock())
-    assert [call[0] for call in manager.mock_calls] == ["metadata", "sync", "live"]
+    assert [call[0] for call in manager.mock_calls] == [
+        "metadata",
+        "requests",
+        "tick",
+        "sync",
+        "live",
+    ]
+
+
+async def test_connection_from_start_to_end() -> None:
+    """A whole connection: settings, requests, history, then the shower."""
+    device = make_device()
+    device.set_thresholds(NEW_THRESHOLDS)
+    callback, received = snapshot_collector()
+    device.register_callback(callback)
+
+    client = live_client([10, 11, 12])
+    client.start_notify.side_effect = BleakError("no notify")
+    client.values.update(
+        {
+            CHAR["uuid"]: bytes(range(16)),
+            CHAR["hw_version"]: b"\x09",
+            CHAR["fw_version"]: b"1.2.3\x00",
+            CHAR["thresholds"]: encode_thresholds(DEFAULT_THRESHOLDS),
+            CHAR["calibration"]: struct.pack("<H", 500),
+            CHAR["shower_range"]: struct.pack("<HH", 1, 1),
+            CHAR["shower_data"]: shower_frame(1, 30),
+        }
+    )
+    remaining = 3  # one wait in the history, two in the live loop
+
+    async def tick(_: float) -> None:
+        nonlocal remaining
+        remaining -= 1
+        if remaining == 0:
+            client.is_connected = False
+
+    with patch("custom_components.hydrao.ble_client.asyncio.sleep", tick):
+        await device._on_connected(client)  # type: ignore[arg-type]
+    device._on_disconnected()
+
+    assert client.writes == [
+        (CHAR["thresholds"], encode_thresholds(NEW_THRESHOLDS)),
+        (CHAR["shower_request"], struct.pack("<H", 1)),
+    ]
+    assert device.thresholds == NEW_THRESHOLDS
+    assert device.total_volume == 30
+    # The shower was visible before the history was read
+    showering = [snapshot["is_showering"] for snapshot in received]
+    totals = [snapshot["total_volume"] for snapshot in received]
+    assert showering.index(True) < totals.index(30)
+    assert device.last_shower is not None
+    assert device.last_shower["volume"] == 12
+    assert device.is_soaping is True
+    device.close()
+
+
+async def test_on_connected_ends_after_a_reset() -> None:
+    """Nothing is read from a shower head that restarts."""
+    device = make_device()
+    device._read_metadata = AsyncMock()  # type: ignore[method-assign]
+    device._send_requests = AsyncMock(return_value=True)  # type: ignore[method-assign]
+    device._live_tick = AsyncMock()  # type: ignore[method-assign]
+    await device._on_connected(MagicMock())
+    device._live_tick.assert_not_awaited()
 
 
 async def test_run_loop_ends_when_not_advertising() -> None:

@@ -19,8 +19,10 @@ from .const import (
     CHAR,
     DEFAULT_CALIBRATION,
     DEFAULT_THRESHOLDS,
-    LEGACY_FLOW,
+    LIVE_EVERY_N_SHOWERS,
     LIVE_POLL_INTERVAL,
+    RESET_VOLUME_COMMAND,
+    SOAPING_TIME,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -47,18 +49,30 @@ class HydraoDevice:
         self.hw_version: int | None = None
         self.fw_version: str | None = None
         self.calibration: int = DEFAULT_CALIBRATION
+        # LED thresholds of the shower head, sorted by volume. They are only
+        # trusted once read from the shower head or restored from storage.
         self.thresholds: list[dict[str, Any]] = list(DEFAULT_THRESHOLDS)
+        self.thresholds_known = False
         self.name: str = (ble_device.name if ble_device and ble_device.name else "Shower")
 
         # Live state
         self.live_volume: int = 0
         self.live_flow: float | None = None
         self.live_temperature: float | None = None
+        self.live_average_flow: float | None = None
+        self.live_average_temperature: float | None = None
         self.live_duration: float | None = None
         self.is_showering: bool = False
+        # The water is off but the shower head still counts the same shower
+        self.is_soaping: bool = False
 
         # Last completed shower
         self.last_shower: dict[str, Any] | None = None
+
+        # Requests waiting for the next connection (persisted via HA storage),
+        # as the shower head can only be reached while the water runs.
+        self.threshold_request: list[dict[str, Any]] | None = None
+        self.need_reset_volume: bool = False
 
         # History sync state (persisted via HA storage)
         self.last_sync_max_index: int | None = None
@@ -79,12 +93,19 @@ class HydraoDevice:
         # there is nothing to connect to and retrying would only fill the logs.
         self._is_present: Callable[[], bool] = lambda: True
 
-        # Live session accumulator
+        # Shower followed live. It survives the soaping break, during which
+        # the shower head is off but keeps its count for the same shower.
         self._session_active = False
         self._session_volume = 0
         self._session_flow_samples: list[float] = []
         self._session_temp_samples: list[float] = []
+        self._session_average_flow: float | None = None
+        self._session_average_temperature: float | None = None
         self._session_start: datetime | None = None
+        self._soaping_timer: asyncio.TimerHandle | None = None
+        # Date and volume of the last shower followed live, until the history
+        # returns it: the history itself has no dates.
+        self._finished_shower: dict[str, Any] | None = None
 
     # ── Public ────────────────────────────────────────────────────────────────
 
@@ -115,6 +136,32 @@ class HydraoDevice:
         if self._task and not self._task.done():
             self._task.cancel()
 
+    def close(self) -> None:
+        """Stop for good, when the integration is unloaded."""
+        self.stop()
+        self._cancel_soaping_timer()
+
+    def set_thresholds(self, thresholds: list[dict[str, Any]]) -> None:
+        """Ask for new LED thresholds.
+
+        They are written within seconds during a shower, otherwise at the
+        start of the next one.
+        """
+        self.threshold_request = None if thresholds == self.thresholds else thresholds
+        self._notify_update()
+
+    def end_shower(self) -> None:
+        """End the current shower so that the next one starts from zero.
+
+        The volume of the shower head is reset within seconds during a
+        shower, otherwise at the start of the next one.
+        """
+        if self._session_active:
+            self._publish_last_shower()
+        self._end_session()
+        self.need_reset_volume = True
+        self._notify_update()
+
     def update_ble_device(self, ble_device: BLEDevice, rssi: int) -> None:
         """Update BLE device reference on rediscovery (used by scanner)."""
         changed = rssi != self.rssi or self.ble_device is None
@@ -138,11 +185,18 @@ class HydraoDevice:
             "live_volume": self.live_volume,
             "live_flow": self.live_flow,
             "live_temperature": self.live_temperature,
+            "live_average_flow": self.live_average_flow,
+            "live_average_temperature": self.live_average_temperature,
             "live_duration": self.live_duration,
             "is_showering": self.is_showering,
+            "is_soaping": self.is_soaping,
             # last shower
             "last_shower": self.last_shower,
             "total_volume": self.total_volume,
+            # settings, with the requested values while they wait to be sent
+            "thresholds": self.threshold_request or self.thresholds,
+            "thresholds_pending": self.threshold_request is not None,
+            "reset_volume_pending": self.need_reset_volume,
         }
 
     # ── Connection loop ────────────────────────────────────────────────────────
@@ -210,49 +264,114 @@ class HydraoDevice:
     # ── On connected ──────────────────────────────────────────────────────────
 
     async def _on_connected(self, client: BleakClient) -> None:
+        """Follow the same steps as the Hydrao app once connected."""
         await self._read_metadata(client)
+        if await self._send_requests(client):
+            return
+        # A first live read, so that the shower shows up before the history
+        await self._live_tick(client)
         await self._sync_history(client)
         await self._live_monitor_loop(client)
 
     def _on_disconnected(self) -> None:
         """Reset all live state when the BLE connection is lost.
 
-        The showerhead stops advertising as soon as it is put back on its
-        holder, so we never see a natural 'volume = 0' frame at the end.
-        We must clear live values here to avoid sensors staying stuck.
+        The shower head is powered by the water, so it disappears as soon as
+        the water stops and we never see a natural 'volume = 0' frame at the
+        end. We must clear live values here to avoid sensors staying stuck.
         """
-        self._finish_session()
+        self._pause_session()
+        self._clear_live()
+        self._notify_update()
 
-        # Reset all live sensors to zero / None
+    def _clear_live(self) -> None:
         self.live_volume = 0
         self.live_flow = None
         self.live_temperature = None
+        self.live_average_flow = None
+        self.live_average_temperature = None
         self.live_duration = None
         self.is_showering = False
-        self._notify_update()
 
-    def _finish_session(self) -> None:
-        """Build the last shower from the live samples, if one was running."""
+    # ── Shower followed live ──────────────────────────────────────────────────
+
+    def _follow_shower(self, volume: int) -> None:
+        """Start a shower, or resume the one paused for soaping."""
         if not self._session_active:
-            return
+            if self.is_soaping and volume >= self._session_volume:
+                self._cancel_soaping_timer()
+                self.is_soaping = False
+                _LOGGER.info("[%s] Shower resumed after soaping", self.address)
+            else:
+                self._end_session()
+                self._session_start = datetime.now(UTC)
+                _LOGGER.info("[%s] Shower started", self.address)
+            self._session_active = True
+        self._session_volume = volume
+
+    def _publish_last_shower(self) -> None:
+        """Build the last shower from what was read live.
+
+        The history only returns it at the next connection, with the soaping
+        time, and replaces this estimate.
+        """
         volume = self._session_volume
         flows = self._session_flow_samples
         temperatures = self._session_temp_samples
-        avg_flow = sum(flows) / len(flows) if flows else None
-        avg_temp = sum(temperatures) / len(temperatures) if temperatures else None
+        flow = self._session_average_flow or (sum(flows) / len(flows) if flows else None)
+        temperature = self._session_average_temperature or (
+            sum(temperatures) / len(temperatures) if temperatures else None
+        )
         self.last_shower = {
             "volume": volume,
-            "temperature": avg_temp,
-            "flow": avg_flow,
-            "duration": volume / avg_flow if avg_flow else None,  # minutes
+            "temperature": temperature,
+            "flow": flow,
+            "duration": volume / flow if flow else None,  # minutes
             "soaping_time": None,
-            "date": (self._session_start or datetime.now(UTC)).isoformat(),
+            "date": self._session_start.isoformat() if self._session_start else None,
         }
-        _LOGGER.info("[%s] Shower ended: %d L", self.address, volume)
+
+    def _pause_session(self) -> None:
+        """The water stopped: the shower is over unless it resumes in time."""
+        if not self._session_active:
+            return
+        self._publish_last_shower()
+        self._session_active = False
+        self.is_soaping = True
+        self._soaping_timer = asyncio.get_running_loop().call_later(
+            SOAPING_TIME, self._on_soaping_timeout
+        )
+        _LOGGER.info("[%s] Water stopped at %d L", self.address, self._session_volume)
+
+    def _on_soaping_timeout(self) -> None:
+        """The water stayed off too long, the shower head closed the shower."""
+        self._soaping_timer = None
+        self._end_session()
+        self._notify_update()
+
+    def _cancel_soaping_timer(self) -> None:
+        if self._soaping_timer is not None:
+            self._soaping_timer.cancel()
+            self._soaping_timer = None
+
+    def _end_session(self) -> None:
+        """Close the shower followed live, the next volume is a new shower."""
+        if self._session_start is not None:
+            self._finished_shower = {
+                "date": self._session_start.isoformat(),
+                "volume": self._session_volume,
+            }
+        self._drop_session()
+
+    def _drop_session(self) -> None:
+        self._cancel_soaping_timer()
+        self.is_soaping = False
         self._session_active = False
         self._session_volume = 0
         self._session_flow_samples = []
         self._session_temp_samples = []
+        self._session_average_flow = None
+        self._session_average_temperature = None
         self._session_start = None
 
     # ── Metadata ──────────────────────────────────────────────────────────────
@@ -273,9 +392,13 @@ class HydraoDevice:
         if thresh_data:
             decoded = proto.decode_thresholds(thresh_data)
             if not proto.thresholds_are_empty(decoded):
-                self.thresholds = decoded
-            else:
-                await self._write(client, "thresholds", proto.encode_thresholds(DEFAULT_THRESHOLDS))
+                self.thresholds = sorted(decoded, key=lambda t: t["liter"])
+                self.thresholds_known = True
+            elif await self._write(
+                client, "thresholds", proto.encode_thresholds(DEFAULT_THRESHOLDS)
+            ):
+                self.thresholds = list(DEFAULT_THRESHOLDS)
+                self.thresholds_known = True
         if cal_data:
             self.calibration = proto.decode_calibration(cal_data)
 
@@ -284,6 +407,37 @@ class HydraoDevice:
             self.address, self.hw_version, self.fw_version, self.calibration,
         )
         self._notify_update()
+
+    # ── Requests ──────────────────────────────────────────────────────────────
+
+    async def _send_requests(self, client: BleakClient) -> bool:
+        """Send what was asked while the shower head was away.
+
+        Returns True when the volume was reset: the shower head restarts, so
+        the connection is over.
+        """
+        request = self.threshold_request
+        if request is not None and (
+            request == self.thresholds
+            or await self._write(client, "thresholds", proto.encode_thresholds(request))
+        ):
+            _LOGGER.info("[%s] LED thresholds set: %s", self.address, request)
+            self.thresholds = request
+            self.thresholds_known = True
+            if self.threshold_request is request:
+                self.threshold_request = None
+            self._notify_update()
+
+        if not self.need_reset_volume:
+            return False
+        # The shower head restarts right away and may not acknowledge the write
+        await self._write(client, "reset_volume", RESET_VOLUME_COMMAND)
+        _LOGGER.info("[%s] Volume reset", self.address)
+        self.need_reset_volume = False
+        # Anything read since the request still belonged to the ended shower
+        self._drop_session()
+        self._notify_update()
+        return True
 
     # ── History sync ──────────────────────────────────────────────────────────
 
@@ -321,20 +475,33 @@ class HydraoDevice:
 
         last_shower_data = None
         try:
-            for shower_id in ids_to_fetch:
+            for count, shower_id in enumerate(ids_to_fetch, start=1):
                 if self._stop.is_set() or not client.is_connected:
                     break
-                data = await self._fetch_one_shower(client, shower_id, use_notify=use_notify)
+                raw = await self._fetch_one_shower(client, shower_id, use_notify=use_notify)
+                if raw is None:
+                    # Not answered: read it again at the next connection
+                    break
+                # Empty showers are skipped for good, like the app does
+                self.last_sync_max_index = shower_id
+                data = proto.decode_shower_data(raw, self.calibration, self.hw_version)
                 if data:
                     last_shower_data = data
-                    self.last_sync_max_index = shower_id
                     self.total_volume = (self.total_volume or 0) + data["volume"]
+                if count % LIVE_EVERY_N_SHOWERS == 0:
+                    # Keep the running shower up to date during a long sync
+                    await self._live_tick(client)
         finally:
             if use_notify:
                 with contextlib.suppress(BleakError, TimeoutError, OSError):
                     await client.stop_notify(CHAR["shower_data"])
 
+        # The newest shower of the history is the one followed live last
+        # time, unless showers were taken out of range in between.
+        finished, self._finished_shower = self._finished_shower, None
         if last_shower_data:
+            if finished and last_shower_data["volume"] >= finished["volume"]:
+                last_shower_data["date"] = finished["date"]
             self.last_shower = last_shower_data
             self._notify_update()
         _LOGGER.info("[%s] History sync done, last_index=%s", self.address, self.last_sync_max_index)
@@ -347,7 +514,7 @@ class HydraoDevice:
 
     async def _fetch_one_shower(
         self, client: BleakClient, shower_id: int, *, use_notify: bool
-    ) -> dict[str, Any] | None:
+    ) -> bytes | None:
         self._shower_notif_event.clear()
         self._shower_notif_data = None
         await self._write(client, "shower_request", proto.encode_shower_request(shower_id))
@@ -363,66 +530,61 @@ class HydraoDevice:
             await asyncio.sleep(0.2)
             data = await self._read(client, "shower_data")
 
-        if not data:
-            return None
-        return proto.decode_shower_data(data, self.calibration)
+        return data or None
 
     # ── Live monitor ──────────────────────────────────────────────────────────
 
     async def _live_monitor_loop(self, client: BleakClient) -> None:
         _LOGGER.info("[%s] Live monitor started", self.address)
-        legacy = self.hw_version is not None and self.hw_version < 8
-
         while not self._stop.is_set() and client.is_connected:
-            vol_data = await self._read(client, "live_volume")
-            if vol_data is None:
-                await asyncio.sleep(LIVE_POLL_INTERVAL)
-                continue
-
-            volume = proto.decode_live_volume(vol_data)
-
-            if volume > 0:
-                flow_data = await self._read(client, "live_flow")
-                temp_data = await self._read(client, "live_temp")
-
-                instant_flow, _ = proto.decode_live_flow(flow_data, self.calibration) if flow_data else (None, None)
-                instant_temp, _ = proto.decode_live_temperature(temp_data) if temp_data else (None, None)
-
-                if legacy:
-                    instant_flow = LEGACY_FLOW
-
-                if not self._session_active:
-                    self._session_active = True
-                    self._session_start = datetime.now(UTC)
-                    self._session_flow_samples = []
-                    self._session_temp_samples = []
-                    _LOGGER.info("[%s] Shower started", self.address)
-
-                self._session_volume = volume
-                if instant_flow is not None:
-                    self._session_flow_samples.append(instant_flow)
-                if instant_temp is not None:
-                    self._session_temp_samples.append(instant_temp)
-
-                live_duration = (volume / instant_flow) if instant_flow else None  # minutes
-
-                self.live_volume = volume
-                self.live_flow = instant_flow
-                self.live_temperature = instant_temp
-                self.live_duration = live_duration
-                self.is_showering = True
-
-            else:
-                self._finish_session()
-
-                self.live_volume = 0
-                self.live_flow = None
-                self.live_temperature = None
-                self.live_duration = None
-                self.is_showering = False
-
-            self._notify_update()
+            if await self._send_requests(client):
+                return
+            await self._live_tick(client)
             await asyncio.sleep(LIVE_POLL_INTERVAL)
+
+    async def _live_tick(self, client: BleakClient) -> None:
+        """Read the running shower once."""
+        vol_data = await self._read(client, "live_volume")
+        if vol_data is None:
+            return
+
+        volume = proto.decode_live_volume(vol_data)
+
+        if volume > 0:
+            flow, average_flow = proto.decode_live_flow(
+                await self._read(client, "live_flow"), self.calibration, self.hw_version
+            )
+            temperature, average_temperature = proto.decode_live_temperature(
+                await self._read(client, "live_temp")
+            )
+
+            self._follow_shower(volume)
+            if flow is not None:
+                self._session_flow_samples.append(flow)
+            if temperature is not None:
+                self._session_temp_samples.append(temperature)
+            self._session_average_flow = average_flow
+            self._session_average_temperature = average_temperature
+
+            # Like the app, the duration comes from the average flow
+            duration_flow = average_flow or flow
+
+            self.live_volume = volume
+            self.live_flow = flow
+            self.live_temperature = temperature
+            self.live_average_flow = average_flow
+            self.live_average_temperature = average_temperature
+            self.live_duration = volume / duration_flow if duration_flow else None  # minutes
+            self.is_showering = True
+
+        else:
+            # Connected with nothing counted: a new shower is starting
+            if self._session_active:
+                self._publish_last_shower()
+            self._end_session()
+            self._clear_live()
+
+        self._notify_update()
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 

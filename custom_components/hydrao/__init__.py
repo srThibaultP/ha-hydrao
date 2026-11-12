@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from homeassistant.components.bluetooth import (
     BluetoothCallbackMatcher,
@@ -26,7 +27,13 @@ _LOGGER = logging.getLogger(__name__)
 
 STORAGE_VERSION = 1
 
-PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR]
+PLATFORMS = [
+    Platform.BINARY_SENSOR,
+    Platform.BUTTON,
+    Platform.NUMBER,
+    Platform.SELECT,
+    Platform.SENSOR,
+]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: HydraoConfigEntry) -> bool:
@@ -54,13 +61,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: HydraoConfigEntry) -> bo
         device.hw_version = opts["hw_version"]
 
     # Restore the history position and the total, so a restart neither reads
-    # the showers again nor counts them twice.
-    store: Store[dict[str, int | None]] = Store(
+    # the showers again nor counts them twice. The LED thresholds and the
+    # requests waiting for the next shower are restored too.
+    store: Store[dict[str, Any]] = Store(
         hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}"
     )
     if stored := await store.async_load():
         device.last_sync_max_index = stored.get("last_sync_max_index")
         device.total_volume = stored.get("total_volume")
+        if thresholds := stored.get("thresholds"):
+            device.thresholds = thresholds
+            device.thresholds_known = True
+        device.threshold_request = stored.get("threshold_request")
+        device.need_reset_volume = bool(stored.get("need_reset_volume"))
 
     # Stop reconnecting as soon as HA no longer sees the showerhead.
     device.set_presence_check(
@@ -105,7 +118,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HydraoConfigEntry) -> bo
     entry.async_on_unload(
         async_track_unavailable(hass, _on_unavailable, address, connectable=True)
     )
-    entry.async_on_unload(device.stop)
+    entry.async_on_unload(device.close)
 
     return True
 

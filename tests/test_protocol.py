@@ -6,7 +6,12 @@ import struct
 import pytest
 
 from custom_components.hydrao import protocol as proto
-from custom_components.hydrao.const import DEFAULT_CALIBRATION, DEFAULT_THRESHOLDS
+from custom_components.hydrao.const import (
+    DEFAULT_CALIBRATION,
+    DEFAULT_THRESHOLDS,
+    LEGACY_FLOW,
+    THRESHOLD_COLORS,
+)
 
 
 def test_device_uuid() -> None:
@@ -33,6 +38,14 @@ def test_thresholds_round_trip() -> None:
     assert proto.decode_thresholds(b"\x00") == []
 
 
+def test_threshold_color_names() -> None:
+    """Colors are named like in the app, whatever the case."""
+    for name, color in THRESHOLD_COLORS.items():
+        assert proto.threshold_color_name(color) == name
+    assert proto.threshold_color_name("#ff00ff") == "purple"
+    assert proto.threshold_color_name("#123456") == "off"
+
+
 def test_shower_range_and_request() -> None:
     """The history range and the request are little endian."""
     assert proto.decode_shower_range(b"\x00") == (0, 0)
@@ -53,6 +66,14 @@ def test_live_flow() -> None:
     assert instant == pytest.approx(24)
     assert average is None
     assert proto.decode_live_flow(struct.pack("<HH", 100, 100), 0) == (None, None)
+    assert proto.decode_live_flow(None, 545) == (None, None)
+
+
+def test_live_flow_of_old_hardware() -> None:
+    """Hardware before version 8 has a fixed flow, even with nothing read."""
+    assert proto.decode_live_flow(None, 545, 7) == (LEGACY_FLOW, LEGACY_FLOW)
+    instant, _ = proto.decode_live_flow(struct.pack("<HH", 100, 100), 500, 8)
+    assert instant == pytest.approx(24)
 
 
 def test_live_temperature() -> None:
@@ -61,7 +82,8 @@ def test_live_temperature() -> None:
     low, high = proto.decode_live_temperature(struct.pack("<HH", 76, 101))
     assert low == 38
     assert high == pytest.approx(36.9, abs=0.1)
-    assert proto.decode_live_temperature(struct.pack("<HH", 3001, 3001)) == (None, None)
+    assert proto.decode_live_temperature(struct.pack("<HH", 3001, 0)) == (None, None)
+    assert proto.decode_live_temperature(None) == (None, None)
 
 
 @pytest.mark.parametrize(
@@ -98,6 +120,15 @@ def test_shower_without_flow_or_temperature() -> None:
     assert shower["temperature"] is None
     assert shower["flow"] is None
     assert shower["duration"] is None
+
+
+def test_shower_of_old_hardware() -> None:
+    """Hardware before version 8 has a fixed flow in the history too."""
+    shower = proto.decode_shower_data(struct.pack("<HHBBB", 7, 34, 0, 0, 0), 500, 7)
+    assert shower is not None
+    assert shower["temperature"] is None
+    assert shower["flow"] == LEGACY_FLOW
+    assert shower["duration"] == pytest.approx(5)
 
 
 def test_shower_with_unusable_calibration() -> None:

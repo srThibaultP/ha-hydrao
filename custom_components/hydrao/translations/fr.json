@@ -17,6 +17,8 @@
       "live_volume":              { "name": "Volume en cours" },
       "live_flow":                { "name": "Débit en cours" },
       "live_temperature":         { "name": "Température en cours" },
+      "live_average_flow":        { "name": "Débit moyen en cours" },
+      "live_average_temperature": { "name": "Température moyenne en cours" },
       "live_duration":            { "name": "Durée en cours" },
       "total_volume":             { "name": "Volume total" },
       "last_shower_volume":       { "name": "Volume dernière douche" },
@@ -26,10 +28,34 @@
       "last_shower_soaping_time": { "name": "Temps savonnage dernière douche" },
       "last_shower_date":         { "name": "Date dernière douche" },
       "rssi":                     { "name": "Signal BLE" },
-      "firmware_version":         { "name": "Version firmware" }
+      "firmware_version":         { "name": "Version firmware" },
+      "calibration":              { "name": "Calibration du débit" }
     },
     "binary_sensor": {
-      "is_showering": { "name": "Douche en cours" }
+      "is_showering": { "name": "Douche en cours" },
+      "is_soaping":   { "name": "Savonnage en cours" }
+    },
+    "button": {
+      "end_shower": { "name": "Terminer la douche" }
+    },
+    "number": {
+      "threshold_volume": { "name": "Volume du seuil LED {number}" }
+    },
+    "select": {
+      "threshold_color": {
+        "name": "Couleur du seuil LED {number}",
+        "state": {
+          "yellow": "Jaune",
+          "orange": "Orange",
+          "red": "Rouge",
+          "purple": "Violet",
+          "blue": "Bleu",
+          "light_blue": "Bleu clair",
+          "green": "Vert",
+          "light_green": "Vert clair",
+          "off": "Éteint"
+        }
+      }
     }
   }
 }

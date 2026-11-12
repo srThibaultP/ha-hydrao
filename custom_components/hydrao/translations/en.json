@@ -17,6 +17,8 @@
       "live_volume":              { "name": "Live volume" },
       "live_flow":                { "name": "Live flow rate" },
       "live_temperature":         { "name": "Live temperature" },
+      "live_average_flow":        { "name": "Live average flow rate" },
+      "live_average_temperature": { "name": "Live average temperature" },
       "live_duration":            { "name": "Live duration" },
       "total_volume":             { "name": "Total water volume" },
       "last_shower_volume":       { "name": "Last shower volume" },
@@ -26,10 +28,34 @@
       "last_shower_soaping_time": { "name": "Last shower soaping time" },
       "last_shower_date":         { "name": "Last shower date" },
       "rssi":                     { "name": "BLE signal strength" },
-      "firmware_version":         { "name": "Firmware version" }
+      "firmware_version":         { "name": "Firmware version" },
+      "calibration":              { "name": "Flow calibration" }
     },
     "binary_sensor": {
-      "is_showering": { "name": "Showering" }
+      "is_showering": { "name": "Showering" },
+      "is_soaping":   { "name": "Soaping" }
+    },
+    "button": {
+      "end_shower": { "name": "End shower" }
+    },
+    "number": {
+      "threshold_volume": { "name": "LED threshold {number} volume" }
+    },
+    "select": {
+      "threshold_color": {
+        "name": "LED threshold {number} color",
+        "state": {
+          "yellow": "Yellow",
+          "orange": "Orange",
+          "red": "Red",
+          "purple": "Purple",
+          "blue": "Blue",
+          "light_blue": "Light blue",
+          "green": "Green",
+          "light_green": "Light green",
+          "off": "Off"
+        }
+      }
     }
   }
 }
