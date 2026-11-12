@@ -24,6 +24,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .const import (
+    SENSOR_CALIBRATION,
     SENSOR_FW_VERSION,
     SENSOR_LAST_DATE,
     SENSOR_LAST_DURATION,
@@ -31,6 +32,8 @@ from .const import (
     SENSOR_LAST_SOAPING,
     SENSOR_LAST_TEMPERATURE,
     SENSOR_LAST_VOLUME,
+    SENSOR_LIVE_AVERAGE_FLOW,
+    SENSOR_LIVE_AVERAGE_TEMPERATURE,
     SENSOR_LIVE_DURATION,
     SENSOR_LIVE_FLOW,
     SENSOR_LIVE_TEMPERATURE,
@@ -81,6 +84,24 @@ SENSOR_DESCRIPTIONS: tuple[HydraoSensorDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         suggested_display_precision=2,
         value_key="live_temperature",
+    ),
+    HydraoSensorDescription(
+        key=SENSOR_LIVE_AVERAGE_FLOW,
+        translation_key=SENSOR_LIVE_AVERAGE_FLOW,
+        native_unit_of_measurement=UnitOfVolumeFlowRate.LITERS_PER_MINUTE,
+        device_class=SensorDeviceClass.VOLUME_FLOW_RATE,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=2,
+        value_key="live_average_flow",
+    ),
+    HydraoSensorDescription(
+        key=SENSOR_LIVE_AVERAGE_TEMPERATURE,
+        translation_key=SENSOR_LIVE_AVERAGE_TEMPERATURE,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=2,
+        value_key="live_average_temperature",
     ),
     HydraoSensorDescription(
         key=SENSOR_LIVE_DURATION,
@@ -177,6 +198,12 @@ SENSOR_DESCRIPTIONS: tuple[HydraoSensorDescription, ...] = (
         translation_key=SENSOR_FW_VERSION,
         entity_category=EntityCategory.DIAGNOSTIC,
         value_key="fw_version",
+    ),
+    HydraoSensorDescription(
+        key=SENSOR_CALIBRATION,
+        translation_key=SENSOR_CALIBRATION,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_key="calibration",
     ),
 )
 

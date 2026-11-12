@@ -8,7 +8,9 @@ La communication BLE est gérée directement par HA via son subsystem Bluetooth 
 
 ## Appareils pris en charge
 
-Les pommeaux Hydrao qui émettent en Bluetooth LE sous le nom `HYDRAO_SHOWER*`. Testé avec le Hydrao Aloe. Les modèles dont le matériel est antérieur à la version 8 ne remontent pas de débit : une valeur fixe de 6,8 L/min est utilisée.
+Les pommeaux Hydrao qui émettent en Bluetooth LE sous le nom `HYDRAO_SHOWER*`. Testé avec le Hydrao Aloe. Les modèles dont le matériel est antérieur à la version 8 ne remontent pas de débit : une valeur fixe de 6,8 L/min est utilisée, en direct comme dans l'historique.
+
+L'intégration suit l'application open source de Hydrao, [hydrao-eco](https://github.com/hydrao-opensource/hydrao-eco) : même décodage, mêmes étapes de connexion, mêmes règles pour les seuils LED et même pause savonnage.
 
 ## Prérequis
 
@@ -50,7 +52,9 @@ Aucune saisie d'adresse MAC n'est nécessaire : l'intégration est uniquement ba
 | `sensor.live_volume` | Sensor | Volume en cours (L) |
 | `sensor.live_flow` | Sensor | Débit instantané (L/min) |
 | `sensor.live_temperature` | Sensor | Température eau en cours (°C) |
-| `sensor.live_duration` | Sensor | Durée douche en cours (min) |
+| `sensor.live_average_flow` | Sensor | Débit moyen de la douche en cours (L/min) |
+| `sensor.live_average_temperature` | Sensor | Température moyenne de la douche en cours (°C) |
+| `sensor.live_duration` | Sensor | Durée douche en cours (min), calculée avec le débit moyen |
 | `sensor.total_volume` | Sensor | Eau totale consommée (L), pour le dashboard Énergie |
 | `sensor.last_shower_volume` | Sensor | Volume dernière douche (L) |
 | `sensor.last_shower_temperature` | Sensor | Température dernière douche (°C) |
@@ -59,15 +63,35 @@ Aucune saisie d'adresse MAC n'est nécessaire : l'intégration est uniquement ba
 | `sensor.last_shower_soaping_time` | Sensor | Temps savonnage (min) |
 | `sensor.last_shower_date` | Sensor | Horodatage dernière douche |
 | `binary_sensor.is_showering` | Binary Sensor | Douche en cours (ON/OFF) |
+| `binary_sensor.is_soaping` | Binary Sensor | Eau coupée pour le savonnage, la douche n'est pas encore terminée |
+| `button.end_shower` | Button | Terminer la douche maintenant, pour que la suivante reparte de zéro |
+| `number.threshold_1_volume` à `_4_volume` *(Configuration)* | Number | Volume de chaque seuil LED (L) |
+| `select.threshold_1_color` à `_4_color` *(Configuration)* | Select | Couleur de chaque seuil LED |
 | `sensor.rssi` *(Diagnostic, désactivé par défaut)* | Sensor | Signal BLE (dBm) |
 | `sensor.firmware_version` *(Diagnostic)* | Sensor | Version firmware |
+| `sensor.calibration` *(Diagnostic)* | Sensor | Calibration du débit enregistrée dans le pommeau |
 
 Tous les capteurs numériques (volume, débit, température, durées) affichent **2 décimales maximum**.
 Les capteurs marqués *Diagnostic* apparaissent dans une section repliée à part sur la fiche de l'appareil.
 
+## Seuils LED
+
+Le pommeau affiche une couleur jusqu'à ce que la douche atteigne le volume du premier seuil, puis la couleur du deuxième, et ainsi de suite. Les quatre seuils se règlent depuis Home Assistant avec les mêmes règles que l'application Hydrao :
+
+- volumes de 2 à 250 L, chaque seuil au moins 2 L au-dessus du précédent
+- couleurs de l'application : jaune, orange, rouge, violet, bleu, bleu clair, vert, vert clair, ou éteint
+
+Les seuils sont connus dès que le pommeau a été vu une fois, et restent modifiables entre deux douches. Un changement fait pendant une douche est écrit en quelques secondes. Sinon il est conservé, même après un redémarrage, et écrit au début de la douche suivante, comme le fait l'application.
+
+## Savonnage et fin de douche
+
+L'eau peut rester coupée jusqu'à 2 minutes sans terminer la douche : le pommeau garde son compteur et reprend quand l'eau revient. Pendant ce temps `binary_sensor.is_soaping` est actif, et les capteurs de la dernière douche affichent déjà la douche en l'état.
+
+`button.end_shower` est le bouton « J'ai fini ma douche » de l'application. Il remet à zéro le volume du pommeau, pour que la personne suivante reparte de zéro et ait sa propre douche. Le pommeau n'est joignable que quand l'eau coule : la remise à zéro est donc envoyée à la connexion suivante, et le pommeau redémarre en la recevant.
+
 ## Mise à jour des données
 
-Le pommeau n'a pas de pile, il est alimenté par le passage de l'eau : il n'est joignable que pendant une douche. Quand il émet, Home Assistant se connecte, lit les versions, lit dans l'historique les douches qu'il ne connaît pas, puis interroge les valeurs en direct toutes les 2 secondes. À la fin de la douche, la connexion se perd et les valeurs en direct sont remises à zéro. Rien n'est interrogé entre deux douches.
+Le pommeau n'a pas de pile, il est alimenté par le passage de l'eau : il n'est joignable que pendant une douche. Quand il émet, Home Assistant se connecte, lit les versions et les réglages, envoie les changements en attente, lit dans l'historique les douches qu'il ne connaît pas, puis interroge les valeurs en direct toutes les 2 secondes. Quand l'eau s'arrête, la connexion se perd et les valeurs en direct sont remises à zéro. Rien n'est interrogé entre deux douches.
 
 ## Cas d'usage et exemples
 
@@ -96,7 +120,9 @@ Le total vient de l'historique stocké dans le pommeau : chaque douche est compt
 ## Limites connues
 
 - Les douches ne peuvent être lues que lorsque le pommeau émet : après un redémarrage, les entités restent indisponibles jusqu'à la douche suivante, sauf le volume total, restauré immédiatement
-- L'historique ne contient pas de date : seule une douche suivie en direct en a une
+- L'historique ne contient pas de date. Une douche suivie en direct garde la sienne quand l'historique la renvoie, une douche prise hors de portée n'en a pas
+- Un changement des seuils LED et le bouton de fin de douche attendent la douche suivante quand le pommeau est éteint
+- La calibration du débit est en lecture seule, l'application Hydrao ne l'écrit jamais
 - Le volume total est ajouté avec une douche de retard, à la connexion suivante
 - L'historique ignore les douches de moins de 3 L
 
@@ -114,19 +140,22 @@ Pommeau Hydrao (BLE — broadcast uniquement pendant une douche)
        ↕ GATT (bleak + bleak-retry-connector, fournis par HA)
 Home Assistant — custom_components/hydrao
   ├── protocol.py      ← décodage binaire GATT (porté de hydrao-ble-raspberry)
-  ├── ble_client.py    ← connexion, sync historique, polling live (2s)
-  ├── coordinator.py   ← push callbacks → entités HA, position d'historique sauvegardée
+  ├── ble_client.py    ← connexion, demandes en attente, sync historique, polling live (2s)
+  ├── coordinator.py   ← push callbacks → entités HA, position d'historique et demandes sauvegardées
   ├── entity.py        ← entité de base
   ├── config_flow.py   ← découverte BLE passive uniquement (aucune saisie manuelle)
-  ├── sensor.py        ← 13 capteurs
-  └── binary_sensor.py ← douche en cours
+  ├── sensor.py        ← 16 capteurs
+  ├── binary_sensor.py ← douche en cours, savonnage
+  ├── button.py        ← fin de douche
+  ├── number.py        ← volumes des seuils LED
+  └── select.py        ← couleurs des seuils LED
 ```
 
 L'intégration ne bloque jamais le démarrage de HA même si le pommeau est hors de portée : les entités sont créées immédiatement (indisponibles), puis un callback Bluetooth se connecte automatiquement dès la prochaine émission du pommeau.
 
 ## Protocole BLE
 
-Basé sur le code open source [hydrao-ble-raspberry](https://github.com/hydrao-opensource/hydrao-ble-raspberry) (Apache 2.0).
+Basé sur le code open source [hydrao-ble-raspberry](https://github.com/hydrao-opensource/hydrao-ble-raspberry) et [hydrao-eco](https://github.com/hydrao-opensource/hydrao-eco) (Apache 2.0).
 
 UUIDs GATT utilisés :
 
@@ -138,7 +167,8 @@ UUIDs GATT utilisés :
 | Volume live     | `0000ca1c-…` |
 | Débit live      | `0000ca31-…` |
 | Température live| `0000ca32-…` |
-| Seuils LED      | `0000ca1d-…` |
+| Seuils LED (lecture et écriture) | `0000ca1d-…` |
+| Remise à zéro du volume (écriture) | `0000ca20-…` |
 | Calibration     | `0000ca30-…` |
 | Plage douches   | `0000ca21-…` |
 | Requête douche  | `0000ca22-…` |

@@ -4,7 +4,19 @@ from __future__ import annotations
 import struct
 from typing import Any
 
-from .const import DEFAULT_CALIBRATION, MAX_SOAPING_TIME, MIN_VALID_VOLUME
+from .const import (
+    DEFAULT_CALIBRATION,
+    LEGACY_FLOW,
+    MAX_SOAPING_TIME,
+    MIN_VALID_VOLUME,
+    THRESHOLD_COLOR_ALIASES,
+    THRESHOLD_COLORS,
+)
+
+_COLOR_NAMES = {
+    **{value: name for name, value in THRESHOLD_COLORS.items()},
+    **THRESHOLD_COLOR_ALIASES,
+}
 
 # ── Device UUID ───────────────────────────────────────────────────────────────
 
@@ -64,6 +76,10 @@ def encode_thresholds(thresholds: list[dict[str, Any]]) -> bytes:
         result[off + 3] = int(color[4:6], 16)
     return bytes(result)
 
+def threshold_color_name(color: str) -> str:
+    """Return the name the app gives to a color, "off" when it has none."""
+    return _COLOR_NAMES.get(color.upper(), "off")
+
 
 # ── Shower range ──────────────────────────────────────────────────────────────
 
@@ -87,15 +103,26 @@ def decode_live_volume(data: bytes) -> int:
     return data[2]
 
 
-def _convert_flow(raw: int, calibration: int) -> float | None:
+def is_legacy(hw_version: int | None) -> bool:
+    """Return whether the hardware is too old to measure the flow."""
+    return hw_version is not None and hw_version < 8
+
+
+def _convert_flow(raw: int, calibration: int, hw_version: int | None = None) -> float | None:
+    if is_legacy(hw_version):
+        return LEGACY_FLOW
     if raw == 0 or calibration == 0:
         return None
     return (1000 * 60 * 20) / (calibration * raw)
 
 
-def decode_live_flow(data: bytes, calibration: int) -> tuple[float | None, float | None]:
+def decode_live_flow(
+    data: bytes | None, calibration: int, hw_version: int | None = None
+) -> tuple[float | None, float | None]:
     """Decode the instant and average flow rates."""
-    if len(data) < 4:
+    if is_legacy(hw_version):
+        return LEGACY_FLOW, LEGACY_FLOW
+    if data is None or len(data) < 4:
         return None, None
     instant_raw = struct.unpack_from("<H", data, 0)[0]
     average_raw = struct.unpack_from("<H", data, 2)[0]
@@ -103,7 +130,7 @@ def decode_live_flow(data: bytes, calibration: int) -> tuple[float | None, float
 
 
 def _convert_temperature(raw: int) -> float | None:
-    if raw > 3000:
+    if raw == 0 or raw > 3000:
         return None
     elif raw > 100:
         return -0.02635 * (raw * 16) + 79.48293
@@ -111,9 +138,9 @@ def _convert_temperature(raw: int) -> float | None:
         return raw / 2
 
 
-def decode_live_temperature(data: bytes) -> tuple[float | None, float | None]:
+def decode_live_temperature(data: bytes | None) -> tuple[float | None, float | None]:
     """Decode the instant and average temperatures."""
-    if len(data) < 4:
+    if data is None or len(data) < 4:
         return None, None
     instant_raw = struct.unpack_from("<H", data, 0)[0]
     average_raw = struct.unpack_from("<H", data, 2)[0]
@@ -122,7 +149,9 @@ def decode_live_temperature(data: bytes) -> tuple[float | None, float | None]:
 
 # ── Historical shower ─────────────────────────────────────────────────────────
 
-def decode_shower_data(data: bytes, calibration: int) -> dict[str, Any] | None:
+def decode_shower_data(
+    data: bytes, calibration: int, hw_version: int | None = None
+) -> dict[str, Any] | None:
     """Decode one shower of the history."""
     if len(data) < 7:
         return None
@@ -140,12 +169,8 @@ def decode_shower_data(data: bytes, calibration: int) -> dict[str, Any] | None:
     soaping_time = min(data[6], MAX_SOAPING_TIME)
 
     temperature = None if temp_raw == 0xFF else _convert_temperature(temp_raw)
-    flow = None
-    duration = None
-    if flow_raw > 0:
-        flow = _convert_flow(flow_raw * 4, calibration)
-        if flow:
-            duration = volume / flow  # minutes (volume L / flow L/min)
+    flow = _convert_flow(flow_raw * 4, calibration, hw_version)
+    duration = volume / flow if flow else None  # minutes (volume L / flow L/min)
 
     return {
         "id": shower_id,
@@ -154,5 +179,5 @@ def decode_shower_data(data: bytes, calibration: int) -> dict[str, Any] | None:
         "flow": flow,
         "duration": duration,
         "soaping_time": soaping_time,
-        "date": None,  # not stored in BLE history, set by live monitor when known
+        "date": None,  # not stored in the history, known when followed live
     }

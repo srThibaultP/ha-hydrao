@@ -31,7 +31,7 @@ class HydraoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         hass: HomeAssistant,
         device: HydraoDevice,
         entry: HydraoConfigEntry,
-        store: Store[dict[str, int | None]],
+        store: Store[dict[str, Any]],
     ) -> None:
         """Initialize the coordinator."""
         super().__init__(
@@ -42,7 +42,7 @@ class HydraoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self.device = device
         self._store = store
-        self._saved_index = device.last_sync_max_index
+        self._saved_state = self._stored_state()
         self._was_showering = False
         self.data = device.as_dict()
 
@@ -63,10 +63,11 @@ class HydraoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         self._was_showering = showering
 
-        # The history position and the total must be saved together
-        if self.device.last_sync_max_index != self._saved_index:
-            self._saved_index = self.device.last_sync_max_index
-            self._store.async_delay_save(self._history_state, 1)
+        # The history position and the total must be saved together, and the
+        # requests must not be lost before the next shower
+        if (state := self._stored_state()) != self._saved_state:
+            self._saved_state = state
+            self._store.async_delay_save(self._stored_state, 1)
 
         # Keep the versions so that they survive a restart
         entry = self.config_entry
@@ -85,11 +86,15 @@ class HydraoCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 },
             )
 
-    def _history_state(self) -> dict[str, int | None]:
+    def _stored_state(self) -> dict[str, Any]:
         """Return what has to survive a restart."""
+        device = self.device
         return {
-            "last_sync_max_index": self.device.last_sync_max_index,
-            "total_volume": self.device.total_volume,
+            "last_sync_max_index": device.last_sync_max_index,
+            "total_volume": device.total_volume,
+            "thresholds": device.thresholds if device.thresholds_known else None,
+            "threshold_request": device.threshold_request,
+            "need_reset_volume": device.need_reset_volume,
         }
 
     async def _async_update_data(self) -> dict[str, Any]:

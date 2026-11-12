@@ -25,6 +25,10 @@ SOAPING = f"sensor.{PREFIX}_last_shower_soaping_time"
 DATE = f"sensor.{PREFIX}_last_shower_date"
 TEMPERATURE = f"sensor.{PREFIX}_last_shower_temperature"
 LIVE_FLOW = f"sensor.{PREFIX}_live_flow_rate"
+AVERAGE_FLOW = f"sensor.{PREFIX}_live_average_flow_rate"
+AVERAGE_TEMPERATURE = f"sensor.{PREFIX}_live_average_temperature"
+CALIBRATION = f"sensor.{PREFIX}_flow_calibration"
+SOAPING_NOW = f"binary_sensor.{PREFIX}_soaping"
 SHOWERING = f"binary_sensor.{PREFIX}_showering"
 
 
@@ -180,7 +184,11 @@ async def test_values(
     push(
         init_integration,
         is_showering=True,
+        is_soaping=True,
         live_flow=7.126,
+        live_average_flow=6.5,
+        live_average_temperature=37.25,
+        calibration=600,
         last_shower={
             "volume": 40,
             "temperature": None,
@@ -193,7 +201,11 @@ async def test_values(
     assert hass.states.get(SHOWERING).state == STATE_ON
     assert hass.states.get(VOLUME).state == "40"
     assert hass.states.get(TEMPERATURE).state == STATE_UNKNOWN
+    assert hass.states.get(SOAPING_NOW).state == STATE_ON
     assert hass.states.get(LIVE_FLOW).state == "7.13"
+    assert hass.states.get(AVERAGE_FLOW).state == "6.5"
+    assert hass.states.get(AVERAGE_TEMPERATURE).state == "37.25"
+    assert hass.states.get(CALIBRATION).state == "600"
     assert float(hass.states.get(SOAPING).state) == 1.5
     assert hass.states.get(DATE).state == date.isoformat()
     state = hass.states.get(TOTAL)
@@ -229,6 +241,9 @@ async def test_history_is_saved(
     assert hass_storage[f"{DOMAIN}.{init_integration.entry_id}"]["data"] == {
         "last_sync_max_index": 7,
         "total_volume": 90,
+        "thresholds": None,
+        "threshold_request": None,
+        "need_reset_volume": False,
     }
 
 
