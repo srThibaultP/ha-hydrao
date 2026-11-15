@@ -1,4 +1,5 @@
 """Hydrao selects: colors of the LED thresholds."""
+
 from __future__ import annotations
 
 from homeassistant.components.select import SelectEntity

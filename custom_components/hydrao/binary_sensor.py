@@ -1,4 +1,5 @@
 """Hydrao binary sensors: is a shower running, or paused for soaping."""
+
 from __future__ import annotations
 
 from homeassistant.components.binary_sensor import (

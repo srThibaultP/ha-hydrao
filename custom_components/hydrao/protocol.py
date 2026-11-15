@@ -1,4 +1,5 @@
 """Hydrao GATT binary protocol decoder."""
+
 from __future__ import annotations
 
 import struct
@@ -20,6 +21,7 @@ _COLOR_NAMES = {
 
 # ── Device UUID ───────────────────────────────────────────────────────────────
 
+
 def decode_device_uuid(data: bytes) -> str:
     """Decode the device UUID."""
     if len(data) >= 16:
@@ -39,6 +41,7 @@ def decode_device_uuid(data: bytes) -> str:
 
 # ── Calibration ───────────────────────────────────────────────────────────────
 
+
 def decode_calibration(data: bytes) -> int:
     """Decode the flow calibration."""
     if len(data) < 2:
@@ -47,6 +50,7 @@ def decode_calibration(data: bytes) -> int:
 
 
 # ── Thresholds ────────────────────────────────────────────────────────────────
+
 
 def decode_thresholds(data: bytes) -> list[dict[str, Any]]:
     """Decode the LED thresholds."""
@@ -60,9 +64,11 @@ def decode_thresholds(data: bytes) -> list[dict[str, Any]]:
         result.append({"color": f"#{r:02X}{g:02X}{b:02X}", "liter": float(liters)})
     return result
 
+
 def thresholds_are_empty(thresholds: list[dict[str, Any]]) -> bool:
     """Return whether no threshold is set."""
     return all(t["liter"] == 0 for t in thresholds)
+
 
 def encode_thresholds(thresholds: list[dict[str, Any]]) -> bytes:
     """Encode the LED thresholds."""
@@ -76,6 +82,7 @@ def encode_thresholds(thresholds: list[dict[str, Any]]) -> bytes:
         result[off + 3] = int(color[4:6], 16)
     return bytes(result)
 
+
 def threshold_color_name(color: str) -> str:
     """Return the name the app gives to a color, "off" when it has none."""
     return _COLOR_NAMES.get(color.upper(), "off")
@@ -83,11 +90,13 @@ def threshold_color_name(color: str) -> str:
 
 # ── Shower range ──────────────────────────────────────────────────────────────
 
+
 def decode_shower_range(data: bytes) -> tuple[int, int]:
     """Decode the first and last shower ids of the history."""
     if len(data) < 4:
         return 0, 0
     return struct.unpack_from("<H", data, 0)[0], struct.unpack_from("<H", data, 2)[0]
+
 
 def encode_shower_request(shower_id: int) -> bytes:
     """Encode the request for one shower of the history."""
@@ -95,6 +104,7 @@ def encode_shower_request(shower_id: int) -> bytes:
 
 
 # ── Live characteristics ──────────────────────────────────────────────────────
+
 
 def decode_live_volume(data: bytes) -> int:
     """Decode the volume of the running shower."""
@@ -108,7 +118,9 @@ def is_legacy(hw_version: int | None) -> bool:
     return hw_version is not None and hw_version < 8
 
 
-def _convert_flow(raw: int, calibration: int, hw_version: int | None = None) -> float | None:
+def _convert_flow(
+    raw: int, calibration: int, hw_version: int | None = None
+) -> float | None:
     if is_legacy(hw_version):
         return LEGACY_FLOW
     if raw == 0 or calibration == 0:
@@ -126,7 +138,9 @@ def decode_live_flow(
         return None, None
     instant_raw = struct.unpack_from("<H", data, 0)[0]
     average_raw = struct.unpack_from("<H", data, 2)[0]
-    return _convert_flow(instant_raw, calibration), _convert_flow(average_raw, calibration)
+    return _convert_flow(instant_raw, calibration), _convert_flow(
+        average_raw, calibration
+    )
 
 
 def _convert_temperature(raw: int) -> float | None:
@@ -149,6 +163,7 @@ def decode_live_temperature(data: bytes | None) -> tuple[float | None, float | N
 
 # ── Historical shower ─────────────────────────────────────────────────────────
 
+
 def decode_shower_data(
     data: bytes, calibration: int, hw_version: int | None = None
 ) -> dict[str, Any] | None:
@@ -159,13 +174,13 @@ def decode_shower_data(
         return None
 
     shower_id = struct.unpack_from("<H", data, 0)[0]
-    volume    = struct.unpack_from("<H", data, 2)[0]
+    volume = struct.unpack_from("<H", data, 2)[0]
 
     if volume == 0 or volume == 65535 or volume < MIN_VALID_VOLUME:
         return None
 
-    temp_raw    = data[4]
-    flow_raw    = data[5]
+    temp_raw = data[4]
+    flow_raw = data[5]
     soaping_time = min(data[6], MAX_SOAPING_TIME)
 
     temperature = None if temp_raw == 0xFF else _convert_temperature(temp_raw)
