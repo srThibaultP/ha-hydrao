@@ -1,4 +1,5 @@
 """Tests of the BLE client."""
+
 from __future__ import annotations
 
 import asyncio
@@ -160,7 +161,9 @@ async def test_metadata_empty_thresholds_are_written() -> None:
         }
     )
     await device._read_metadata(client)  # type: ignore[arg-type]
-    assert client.writes == [(CHAR["thresholds"], encode_thresholds(DEFAULT_THRESHOLDS))]
+    assert client.writes == [
+        (CHAR["thresholds"], encode_thresholds(DEFAULT_THRESHOLDS))
+    ]
     assert device.thresholds == DEFAULT_THRESHOLDS
     assert device.thresholds_known is True
 
@@ -169,7 +172,10 @@ async def test_metadata_unreadable() -> None:
     """Failed reads leave the defaults."""
     device = make_device()
     client = FakeClient(
-        dict.fromkeys(("uuid", "hw_version", "fw_version", "thresholds", "calibration"), BleakError("x"))  # type: ignore[arg-type]
+        dict.fromkeys(
+            ("uuid", "hw_version", "fw_version", "thresholds", "calibration"),
+            BleakError("x"),
+        )  # type: ignore[arg-type]
     )
     await device._read_metadata(client)  # type: ignore[arg-type]
     assert device.uuid is None

@@ -1,4 +1,5 @@
 """Config flow for Hydrao — BLE discovery, with standard manual entry point."""
+
 from __future__ import annotations
 
 from typing import Any

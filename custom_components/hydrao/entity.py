@@ -1,4 +1,5 @@
 """Base entity of the Hydrao integration."""
+
 from __future__ import annotations
 
 from typing import Any

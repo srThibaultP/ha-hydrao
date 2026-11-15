@@ -1,11 +1,12 @@
 """Hydrao BLE client: connection, history sync and live polling of one device."""
+
 from __future__ import annotations
 
 import asyncio
-import contextlib
-import logging
 from collections.abc import Callable
+import contextlib
 from datetime import UTC, datetime, timedelta
+import logging
 from typing import Any
 
 from bleak import BleakClient
@@ -19,8 +20,8 @@ from .const import (
     CHAR,
     DEFAULT_CALIBRATION,
     DEFAULT_THRESHOLDS,
-    LIVE_EVERY_N_SHOWERS,
     LINK_LOSS_GRACE,
+    LIVE_EVERY_N_SHOWERS,
     LIVE_POLL_INTERVAL,
     RESET_VOLUME_COMMAND,
     SOAPING_TIME,
@@ -54,7 +55,7 @@ class HydraoDevice:
         # trusted once read from the shower head or restored from storage.
         self.thresholds: list[dict[str, Any]] = list(DEFAULT_THRESHOLDS)
         self.thresholds_known = False
-        self.name: str = (ble_device.name if ble_device and ble_device.name else "Shower")
+        self.name: str = ble_device.name if ble_device and ble_device.name else "Shower"
 
         # Live state
         self.live_volume: int = 0
@@ -217,7 +218,9 @@ class HydraoDevice:
         failures = 0
         while not self._stop.is_set():
             if not self._is_present():
-                _LOGGER.debug("[%s] Not advertising, waiting for next shower", self.address)
+                _LOGGER.debug(
+                    "[%s] Not advertising, waiting for next shower", self.address
+                )
                 return
             try:
                 await self._connect_and_run()
@@ -231,12 +234,18 @@ class HydraoDevice:
                     _LOGGER.warning(
                         "[%s] Still unable to connect after %d attempts while the "
                         "device is advertising (signal %s dBm): %s",
-                        self.address, failures, self.rssi, err,
+                        self.address,
+                        failures,
+                        self.rssi,
+                        err,
                     )
                 else:
                     _LOGGER.debug(
                         "[%s] BLE error (attempt %d): %s, retry in %ds",
-                        self.address, failures, err, backoff,
+                        self.address,
+                        failures,
+                        err,
+                        backoff,
                     )
             except Exception:
                 _LOGGER.exception("[%s] Unexpected error", self.address)
@@ -253,7 +262,9 @@ class HydraoDevice:
             BleakClient,
             self.ble_device,
             self.address,
-            disconnected_callback=lambda _: _LOGGER.debug("[%s] Disconnected", self.address),
+            disconnected_callback=lambda _: _LOGGER.debug(
+                "[%s] Disconnected", self.address
+            ),
             max_attempts=3,
         )
         self._client = client
@@ -348,7 +359,9 @@ class HydraoDevice:
         volume = self._session_volume
         flows = self._session_flow_samples
         temperatures = self._session_temp_samples
-        flow = self._session_average_flow or (sum(flows) / len(flows) if flows else None)
+        flow = self._session_average_flow or (
+            sum(flows) / len(flows) if flows else None
+        )
         temperature = self._session_average_temperature or (
             sum(temperatures) / len(temperatures) if temperatures else None
         )
@@ -406,11 +419,11 @@ class HydraoDevice:
     # ── Metadata ──────────────────────────────────────────────────────────────
 
     async def _read_metadata(self, client: BleakClient) -> None:
-        uuid_data  = await self._read(client, "uuid")
-        hw_data    = await self._read(client, "hw_version")
-        fw_data    = await self._read(client, "fw_version")
+        uuid_data = await self._read(client, "uuid")
+        hw_data = await self._read(client, "hw_version")
+        fw_data = await self._read(client, "fw_version")
         thresh_data = await self._read(client, "thresholds")
-        cal_data   = await self._read(client, "calibration")
+        cal_data = await self._read(client, "calibration")
 
         if uuid_data:
             self.uuid = proto.decode_device_uuid(uuid_data)
@@ -433,7 +446,10 @@ class HydraoDevice:
 
         _LOGGER.info(
             "[%s] Metadata: hw=%s fw=%s cal=%d",
-            self.address, self.hw_version, self.fw_version, self.calibration,
+            self.address,
+            self.hw_version,
+            self.fw_version,
+            self.calibration,
         )
         self._notify_update()
 
@@ -500,14 +516,20 @@ class HydraoDevice:
             await asyncio.sleep(0.2)
             use_notify = True
         except (BleakError, TimeoutError, OSError) as exc:
-            _LOGGER.debug("[%s] Notifications unavailable (%s), falling back to polling", self.address, exc)
+            _LOGGER.debug(
+                "[%s] Notifications unavailable (%s), falling back to polling",
+                self.address,
+                exc,
+            )
 
         last_shower_data = None
         try:
             for count, shower_id in enumerate(ids_to_fetch, start=1):
                 if self._stop.is_set() or not client.is_connected:
                     break
-                raw = await self._fetch_one_shower(client, shower_id, use_notify=use_notify)
+                raw = await self._fetch_one_shower(
+                    client, shower_id, use_notify=use_notify
+                )
                 if raw is None:
                     # Not answered: read it again at the next connection
                     break
@@ -533,7 +555,11 @@ class HydraoDevice:
                 last_shower_data["date"] = finished["date"]
             self.last_shower = last_shower_data
             self._notify_update()
-        _LOGGER.info("[%s] History sync done, last_index=%s", self.address, self.last_sync_max_index)
+        _LOGGER.info(
+            "[%s] History sync done, last_index=%s",
+            self.address,
+            self.last_sync_max_index,
+        )
 
     def _on_shower_notification(
         self, _sender: BleakGATTCharacteristic, data: bytearray
@@ -546,7 +572,9 @@ class HydraoDevice:
     ) -> bytes | None:
         self._shower_notif_event.clear()
         self._shower_notif_data = None
-        await self._write(client, "shower_request", proto.encode_shower_request(shower_id))
+        await self._write(
+            client, "shower_request", proto.encode_shower_request(shower_id)
+        )
 
         if use_notify:
             try:

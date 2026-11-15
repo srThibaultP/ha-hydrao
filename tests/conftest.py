@@ -1,4 +1,5 @@
 """Common fixtures for the Hydrao tests."""
+
 from __future__ import annotations
 
 from collections.abc import Generator
@@ -7,7 +8,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pytest_homeassistant.common import MockConfigEntry
-from pytest_homeassistant.components.bluetooth import generate_advertisement_data, generate_ble_device
+from pytest_homeassistant.components.bluetooth import (
+    generate_advertisement_data,
+    generate_ble_device,
+)
 
 from custom_components.hydrao.const import CHAR, DOMAIN
 from homeassistant.components.bluetooth import BluetoothServiceInfoBleak

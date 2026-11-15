@@ -1,4 +1,5 @@
 """Hydrao coordinator: bridges the BLE client callbacks to Home Assistant."""
+
 from __future__ import annotations
 
 import logging

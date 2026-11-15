@@ -1,4 +1,5 @@
 """Hydrao button: end the current shower."""
+
 from __future__ import annotations
 
 from homeassistant.components.button import ButtonEntity

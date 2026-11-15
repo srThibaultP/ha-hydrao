@@ -23,3 +23,21 @@ files = ["custom_components/hydrao"]
 [[tool.mypy.overrides]]
 module = ["homeassistant.*"]
 follow_imports = "silent"
+
+[tool.ruff]
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "ASYNC", "PT"]
+# Long lines are left to the formatter, as in Home Assistant core
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Home Assistant declares entity and flow attributes as class variables
+"custom_components/*" = ["RUF012"]
+
+[tool.ruff.lint.isort]
+# Same import order as Home Assistant core
+force-sort-within-sections = true
+combine-as-imports = true
+known-first-party = ["homeassistant"]

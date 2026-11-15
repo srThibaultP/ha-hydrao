@@ -1,10 +1,11 @@
 """Tests of the settings: LED thresholds and end of the shower."""
+
 from __future__ import annotations
 
 from typing import Any
 
-from pytest_homeassistant.common import MockConfigEntry, async_fire_time_changed
 import pytest
+from pytest_homeassistant.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.hydrao.const import DEFAULT_THRESHOLDS, DOMAIN
 from homeassistant.components.button import DOMAIN as BUTTON_DOMAIN, SERVICE_PRESS

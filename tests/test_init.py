@@ -1,12 +1,13 @@
 """Tests of the setup, the sensors and the diagnostics."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import patch
 
-from pytest_homeassistant.common import MockConfigEntry, async_fire_time_changed
 import pytest
+from pytest_homeassistant.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.hydrao.const import DOMAIN
 from custom_components.hydrao.diagnostics import async_get_config_entry_diagnostics
@@ -145,12 +146,8 @@ async def test_shower_head_already_advertising(
             "custom_components.hydrao.async_ble_device_from_address",
             return_value=info.device,
         ),
-        patch(
-            "custom_components.hydrao.async_last_service_info", return_value=info
-        ),
-        patch(
-            "custom_components.hydrao.ble_client.HydraoDevice.start"
-        ) as start,
+        patch("custom_components.hydrao.async_last_service_info", return_value=info),
+        patch("custom_components.hydrao.ble_client.HydraoDevice.start") as start,
     ):
         await hass.config_entries.async_setup(mock_config_entry.entry_id)
         await hass.async_block_till_done()
@@ -218,9 +215,7 @@ async def test_presence_check(
     assert init_integration.runtime_data.device._is_present() is False
 
 
-async def test_values(
-    hass: HomeAssistant, init_integration: MockConfigEntry
-) -> None:
+async def test_values(hass: HomeAssistant, init_integration: MockConfigEntry) -> None:
     """Sensors show what the client pushes."""
     date = datetime(2026, 11, 6, 7, 30, tzinfo=UTC)
     push(init_integration, ble_device=make_service_info().device)
